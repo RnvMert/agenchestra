@@ -163,7 +163,7 @@ class HookGirdisi(unittest.TestCase):
         d = json.load(open(os.path.join(KOK, "hooks", "hooks.json"), encoding="utf-8"))
         komutlar = [h["command"] for g in d["hooks"]["UserPromptSubmit"] for h in g["hooks"]]
         self.assertTrue(any("refleks_hook.py" in c for c in komutlar))
-        self.assertTrue(any("hook.py\" UserPromptSubmit" in c for c in komutlar))
+        self.assertTrue(any(("hook_giris.py\" UserPromptSubmit" in c or "hook.py\" UserPromptSubmit" in c) for c in komutlar))
 
 
 if __name__ == "__main__":

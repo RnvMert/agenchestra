@@ -53,6 +53,7 @@ def _kur_eklenti(kok: Path, ad: str = "my plugin") -> Path:
         assert kaynak.is_file(), f"{kaynak} yok"
         shutil.copyfile(kaynak, ek / "bin" / ad)
     (ek / "scripts" / "hook.py").write_text(SAHTE_HOOK, encoding="utf-8")
+    (ek / "scripts" / "hook_giris.py").write_text(SAHTE_HOOK, encoding="utf-8")  # I-434: hooks.json girişi
     return ek
 
 
@@ -153,7 +154,7 @@ def test_hooks_json_dogrudan_python_cagiriyor():
     assert len(kancalar) >= 9
     for olay, h in kancalar:
         assert "hook_python" not in h["command"], f"{olay}: sarmalayıcı zincirine geri dönülmemeli"
-        assert "scripts/hook.py" in h["command"], f"{olay}: hook.py yolu komutta olmalı"
+        assert "scripts/hook_giris.py" in h["command"], f"{olay}: hook_giris.py yolu komutta olmalı (I-434)"
 
 
 def test_hooks_json_hicbir_kancada_args_yok():
@@ -164,7 +165,7 @@ def test_hooks_json_hicbir_kancada_args_yok():
 
 def test_hooks_json_komut_tam_bicimde_ve_olay_adi_dogru():
     sayi = 0
-    hook = '"${CLAUDE_PLUGIN_ROOT}/scripts/hook.py"'
+    hook = '"${CLAUDE_PLUGIN_ROOT}/scripts/hook_giris.py"'
     for olay, h in _tum_kancalar():
         sayi += 1
         beklenen = (f'if command -v python >/dev/null 2>&1; then exec python {hook} {olay}; '

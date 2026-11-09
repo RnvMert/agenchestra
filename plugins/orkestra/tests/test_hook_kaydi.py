@@ -87,7 +87,7 @@ class HookKaydiTest(unittest.TestCase):
         for olay, bloklar in h.items():
             for b in bloklar:
                 for k in b["hooks"]:
-                    if "hook.py" in k["command"]:
+                    if "hook_giris.py" in k["command"] or "scripts/hook.py" in k["command"]:
                         self.assertEqual(k["timeout"], H.ZA_S.get(olay, H.VARSAYILAN_ZA_S), olay)
 
     def _hizli(self, n):

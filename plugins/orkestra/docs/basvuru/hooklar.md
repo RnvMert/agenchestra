@@ -2,7 +2,7 @@
 
 # Hook'lar
 
-Kaynak: `hooks/hooks.json`; hepsi `scripts/hook.py <Olay>` çağırır.
+Kaynak: `hooks/hooks.json`; hepsi `scripts/hook_giris.py <Olay>` çağırır (bayt kodu önbelleğini açıp hook.py'yi modül olarak çalıştırır).
 
 | Olay | Eşleyici | Komut sayısı |
 |---|---|---|

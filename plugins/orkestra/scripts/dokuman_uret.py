@@ -102,7 +102,7 @@ def ayarlar():
 def hooklar():
     d = json.loads(_oku(KOK / "hooks" / "hooks.json"))
     d = d.get("hooks", d)
-    s = ["# Hook'lar\n", "Kaynak: `hooks/hooks.json`; hepsi `scripts/hook.py <Olay>` çağırır.\n",
+    s = ["# Hook'lar\n", "Kaynak: `hooks/hooks.json`; hepsi `scripts/hook_giris.py <Olay>` çağırır (bayt kodu önbelleğini açıp hook.py'yi modül olarak çalıştırır).\n",
          "| Olay | Eşleyici | Komut sayısı |", "|---|---|---|"]
     for olay, girdiler in d.items():
         for g in girdiler:

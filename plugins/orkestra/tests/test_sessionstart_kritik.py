@@ -84,7 +84,7 @@ class SessionStartKritik(unittest.TestCase):
         s = '"${CLAUDE_PLUGIN_ROOT}/scripts/sessionstart_kritik.py"'  # ana hook ile aynı python/py -3/python3 seçicisi
         self.assertEqual(kritik[0], f"if command -v python >/dev/null 2>&1; then exec python {s}; "
                                     f"elif command -v py >/dev/null 2>&1; then exec py -3 {s}; else exec python3 {s}; fi")
-        self.assertTrue(any("hook.py" in k and "SessionStart" in k for k in komutlar))
+        self.assertTrue(any(("hook_giris.py" in k or "hook.py" in k) and "SessionStart" in k for k in komutlar))
 
 
 if __name__ == "__main__":
