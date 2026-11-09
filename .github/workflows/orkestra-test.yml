@@ -41,6 +41,6 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install pytest
-      - name: Tüm testler (paralel koşucu)
+      - name: Tüm testler (paralel koşucu, bilinen-hata tabanına karşı)
         working-directory: plugins/orkestra
-        run: python scripts/test_paralel.py -n 4 --zaman-asimi 900 --en-yavas 10
+        run: python scripts/ci_tam_takim.py -- -n 4 --zaman-asimi 900 --en-yavas 10
