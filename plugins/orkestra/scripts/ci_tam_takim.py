@@ -15,6 +15,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cfg  # noqa: E402
+
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -56,7 +59,7 @@ def main(argv):
     argv = [a for a in argv if a != "--"]
     p = subprocess.run([sys.executable, os.path.join(KOK, "scripts", "test_paralel.py")] + argv,
                        cwd=KOK, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                       errors="replace")
+                       errors="replace", **cfg.PENCERESIZ)
     print(p.stdout)
     ozet = re.search(r"(\d+) dosya, (\d+) düşen, (\d+) süre aşan", p.stdout)
     if not ozet:
