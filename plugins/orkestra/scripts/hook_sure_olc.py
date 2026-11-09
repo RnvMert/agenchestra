@@ -16,6 +16,9 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cfg  # noqa: E402
+
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ORNEK_YUK = {
@@ -62,7 +65,7 @@ def degiskenler(kok, olay, onbellek_dizini):
 
 def kos(komut, ortam, yuk_baytlari, cwd):
     t = time.perf_counter()
-    subprocess.run(komut, env=ortam, input=yuk_baytlari, capture_output=True, cwd=cwd)
+    subprocess.run(komut, env=ortam, input=yuk_baytlari, capture_output=True, cwd=cwd, **cfg.PENCERESIZ)
     return (time.perf_counter() - t) * 1000
 
 
