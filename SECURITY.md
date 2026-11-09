@@ -1,3 +1,12 @@
+# Security: orkestra plugin
+
+This page gathers what the plugin does and does not do for the user. The Turkish text below is the full note; each point here follows a sentence there.
+
+- **A secret value is never written to a log, a document, memory, or the command line.**
+- **The credentials folder is per user** and sits outside the project, the repository, and the plugin directory: `~/.orkestra/credentials/<proje>/<servis>.env`. Only the current user can open it.
+- **`git push`, GitHub writes, and Jira writes are asked for confirmation; a force-push is denied.**
+- **If you find a security vulnerability, report it privately to the repository owner before opening a public issue.** This document holds no secret value; values stay only in the credentials folder.
+
 # Güvenlik: orkestra eklentisi
 
 Bu belge eklentinin kullanıcıya ne yaptığını ve neyi yapmadığını tek sayfada toplar. Her madde bir karar kaydına (ADR) ya da ayar dosyasına dayanır; ADR'ler eklentiyi kullanan projenin `adr/` klasöründe tutulur.
