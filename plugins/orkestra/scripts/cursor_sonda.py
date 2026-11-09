@@ -9,7 +9,7 @@ Kanıt hook ve dosya tarafındadır, modelin anlatımına güvenilmez: Cursor'a 
 CURSOR_CONVERSATION_ID değeri hook yükündeki session_id ile aynı mı, komut gerçekten çıktı verdi mi. Sonda proje hook'u olarak
 yalnız bir yük kayıtçısı ekler; Orkestra adaptörü kullanıcının gerçek Cursor kurulumundan (yerel kopya) gelir, böylece 'kurulu mu'
 sorusu da yanıtlanır. Hook komutları `python -c "..."` biçimindedir: Cursor Shell'i PowerShell olduğundan baştaki tırnaklı yol
-(`"C:/.../python.exe" ...`) söz dizimi hatasıdır."""
+(`"<python yolu>" -c ...`) söz dizimi hatasıdır."""
 import json
 import os
 import shutil

@@ -22,3 +22,25 @@ jobs:
       - name: I-026 testleri
         working-directory: plugins/orkestra
         run: python -m pytest tests/test_cfg.py tests/test_doktor.py tests/test_doktor_hizli_yol.py tests/test_doktor_proje.py tests/test_tasinabilirlik.py tests/test_cli_baslatici.py tests/test_python_secimi.py -q
+
+  # Tam takım: tests/ altındaki her test dosyası koşar; yeni test dosyası listeye eklenmeden CI'ya girer.
+  # Taşınabilirlik alt kümesi (yukarıdaki iş) 6 hücrede koşar; tam takım pahalı olduğu için 3.13 ile iki işletim sisteminde.
+  tam-takim:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      ORKESTRA_DOKTOR_OTOMATIK: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pytest
+      - name: Tüm testler (paralel koşucu)
+        working-directory: plugins/orkestra
+        run: python scripts/test_paralel.py -n 4 --zaman-asimi 900 --en-yavas 10
