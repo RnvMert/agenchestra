@@ -3,14 +3,15 @@
 
 Neden: tam takımda işletim sistemine bağlı eski hatalar var; hepsi düzelene kadar CI ya hep kırmızı kalır (yeni hata
 gürültüde kaybolur) ya da hata yutulur. Bu betik tabanı kilitler (ratchet): taban dışı yeni düşen CI'yı kırar; tabandaki
-bir test düzelince de kırar (satırı silmek gerekir), böylece taban yalnız küçülür.
+bir test düzelince uyarı verir (satırı silmek gerekir; uyarı kırmaz, çünkü zamana bağlı test geçici geçebilir).
 
 Kullanım: ci_tam_takim.py [--taban DOSYA] [-- test_paralel argümanları]
 Taban: satır başına bir pytest düğüm kimliği (`tests/x.py::Sinif::test`); `#` ile başlayan satır ve boş satır yok sayılır.
-Varsayılan taban: tests/ci_taban_<linux|windows|macos>.txt. Çıkış: 0 taban dışı fark yok; 1 yeni düşen / eskimiş taban satırı /
+Varsayılan taban: tests/ci_taban_<linux|windows|macos>.txt. Çıkış: 0 taban dışı fark yok; 1 yeni düşen / süre aşan dosya /
 koşucu sonuç üretmeden çıktı.
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -57,23 +58,24 @@ def main(argv):
                        cwd=KOK, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                        errors="replace")
     print(p.stdout)
-    if "=====" not in p.stdout:
+    ozet = re.search(r"(\d+) dosya, (\d+) düşen, (\d+) süre aşan", p.stdout)
+    if not ozet:
         print("ci_tam_takim: koşucu özet satırı üretmedi (çıkış %d); sonuç yorumlanamaz." % p.returncode)
         return 1
-    yeni, duzelen = karsilastir(dusenler(p.stdout), taban_oku(taban_yolu))
-    if "zaman aşımı" in p.stdout.lower() and p.returncode not in (0, 1):
-        print("ci_tam_takim: koşucu beklenmeyen çıkış verdi (%d)." % p.returncode)
+    if int(ozet.group(3)) > 0:
+        print("ci_tam_takim: %s dosya süre aştı; tabanla karşılaştırılamaz." % ozet.group(3))
         return 1
+    yeni, duzelen = karsilastir(dusenler(p.stdout), taban_oku(taban_yolu))
     if yeni:
         print("YENİ DÜŞEN (tabanda yok):")
         print("\n".join("  " + d for d in yeni))
     if duzelen:
-        print("TABAN ESKİMİŞ (artık geçiyor; %s dosyasından sil):" % os.path.relpath(taban_yolu, KOK))
+        print("::warning::TABAN ESKİMİŞ, artık geçiyor (%s dosyasından sil):" % os.path.relpath(taban_yolu, KOK))
         print("\n".join("  " + d for d in duzelen))
-    if not yeni and not duzelen:
-        print("ci_tam_takim: düşenler tabanla aynı (%d bilinen hata)." % len(taban_oku(taban_yolu)))
-        return 0
-    return 1
+    if yeni:
+        return 1
+    print("ci_tam_takim: yeni düşen yok (%d bilinen hata tabanda)." % len(taban_oku(taban_yolu)))
+    return 0
 
 
 if __name__ == "__main__":
