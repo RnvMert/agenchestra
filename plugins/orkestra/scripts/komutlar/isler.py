@@ -101,21 +101,97 @@ def _acik_maddeleri_yaz(satirlar, tum):
         print(f"  … {kalan} açık madde daha; tümü için `--tum`.")
 
 
-def _klasor_kok_disi(sd, yol):
-    """Bağlı worktree oturumunda iş klasörü oturum kökü dışındaysa hata metni, değilse ''. Uygulama göreli bağlantıyı
-    oturum klasörüne göre çözdüğü için kök dışı belge açılmaz (ADR-0035). ORKESTRA_IS_KLASOR_KOK=0 kapatır."""
-    if os.environ.get("ORKESTRA_IS_KLASOR_KOK") == "0":
-        return ""
-    proje = os.path.dirname(os.path.dirname(sd))
-    kok = L.baglanti_koku(proje)
+def _kok_altinda(yol, kok):
     n = lambda x: os.path.normcase(os.path.abspath(x))  # noqa: E731
-    if n(kok) == n(proje) or (n(yol) + os.sep).startswith(n(kok) + os.sep):
-        return ""
-    oneri = ""
-    if (n(yol) + os.sep).startswith(n(proje) + os.sep):
-        oneri = f" Önerilen yol: {os.path.join(kok, os.path.relpath(os.path.abspath(yol), proje))}"
-    return (f"iş klasörü oturum kökü dışında: {yol} (oturum kökü: {kok}). Belge bağlantıları oturum köküne göre çözülür; "
-            f"klasörü oturum kökü altında aç.{oneri} Kapatma: ORKESTRA_IS_KLASOR_KOK=0.")
+    return (n(yol) + os.sep).startswith(n(kok) + os.sep)
+
+
+def _klasor_kok_disi(sd, yol):
+    """Bağlı worktree oturumunda iş klasörü oturum kökü dışındaysa (yol, '') yerine (kök altındaki karşılığı, bilgi
+    satırı) döner; reddetmez (I-435 P2). Uygulama göreli bağlantıyı oturum klasörüne göre çözdüğü için iş klasörü
+    oturum kökü altında olmalıdır (ADR-0035). Proje altındaki yol aynı göreli konuma, proje dışındaki yol kökteki
+    son bileşenine çevrilir; sonuç her zaman kökün ALTINDADIR (`..` ile kaçış yok). Karşılık kökün kendisi olursa
+    yol None döner (çağıran sıradaki NNN klasörünü türetir). ORKESTRA_IS_KLASOR_KOK=0 çevirmeyi kapatır."""
+    if os.environ.get("ORKESTRA_IS_KLASOR_KOK") == "0":
+        return yol, ""
+    proje = os.path.dirname(os.path.dirname(sd))
+    kok = os.path.abspath(L.baglanti_koku(proje))
+    yol = os.path.abspath(yol)
+    if os.path.normcase(kok) == os.path.normcase(os.path.abspath(proje)) or _kok_altinda(yol, kok):
+        return yol, ""
+    if _kok_altinda(yol, proje):
+        parcalar = _proje_gorelisi(yol, proje)
+    else:
+        parcalar = [os.path.basename(yol)]
+    parcalar = [p for p in parcalar if p not in ("", ".", "..")]
+    yeni = os.path.abspath(os.path.join(kok, *parcalar)) if parcalar else kok
+    if not _kok_altinda(yeni, kok):  # savunma: çevrilen yol kök dışına çıkamaz
+        yeni = kok
+    hedef = yeni if os.path.normcase(yeni) != os.path.normcase(kok) else None
+    return hedef, (f"orkestra: iş klasörü oturum kökü dışındaydı ({yol}); oturum kökü altına çevrildi: "
+                   f"{hedef or kok + os.sep + '<sıradaki NNN>'}")
+
+
+def _proje_gorelisi(yol, proje):
+    """Proje altındaki yolun göreli parçaları; bir oturum ağacındaysa (.claude/worktrees/<ad>/) ağaç öneki atılır."""
+    parcalar = os.path.relpath(os.path.abspath(yol), proje).replace("\\", "/").split("/")
+    if [p.casefold() for p in parcalar[:2]] == [".claude", "worktrees"]:
+        parcalar = parcalar[3:]
+    return [p for p in parcalar if p not in ("", ".", "..")]
+
+
+def _varsayilan_ust(sd, kok):
+    """`--klasor` verilmezse iş klasörünün açılacağı üst klasör (I-435 P2). Eşleme (baglam.json `projeler`) yoksa
+    oturum kökü. Varsa: eşlenen bir projede duran, görev desenine uyan en son açılmış işin üst klasörü (ör.
+    Claude_Orkestrasyon/ ya da RNV/01_x/) oturum köküne taşınarak kullanılır; böyle iş yoksa ilk proje klasörü.
+    Sonuç her zaman oturum kökü altındadır."""
+    try:
+        import baglam
+        esleme = baglam.esleme_oku(sd) or {}
+    except Exception:
+        esleme = {}
+    projeler = {str(p).strip().casefold(): str(p).strip() for p in esleme.get("projeler") or [] if str(p).strip()}
+    if not projeler:
+        return kok
+    proje = os.path.abspath(os.path.dirname(os.path.dirname(sd)))
+    haric = {str(h).casefold() for h in esleme.get("haric") or []}
+    try:
+        desen = re.compile(esleme.get("gorev_deseni") or r"^\d{3}-")
+    except re.error:
+        desen = re.compile(r"^\d{3}-")
+    en_son = None
+    try:
+        isler = _ik().merkez_isler(sd).values()
+    except Exception:
+        isler = []
+    for g in isler:
+        k = g.get("klasor") if isinstance(g, dict) else None
+        if not k or not desen.match(os.path.basename(os.path.normpath(k))):
+            continue
+        ust = os.path.dirname(os.path.abspath(k))
+        if not (_kok_altinda(ust, proje) or os.path.normcase(ust) == os.path.normcase(proje)):
+            continue
+        parcalar = _proje_gorelisi(ust, proje)
+        if not parcalar or parcalar[0].casefold() not in projeler or any(p.casefold() in haric for p in parcalar):
+            continue
+        anahtar = str(g.get("olusturma") or "")
+        if en_son is None or anahtar > en_son[0]:
+            en_son = (anahtar, parcalar)
+    parcalar = en_son[1] if en_son else [next(iter(projeler.values()))]
+    ust = os.path.abspath(os.path.join(kok, *parcalar))
+    return ust if _kok_altinda(ust, kok) else kok
+
+
+def _varsayilan_klasor(sd, baslik):
+    """`--klasor` verilmezse oturum kökü (bağlantı kökü) altında, eşlemeye göre seçilen üst klasörde sıradaki
+    NNN-tarih-slug klasörü (I-435 P2)."""
+    kok = os.path.abspath(L.baglanti_koku(os.path.dirname(os.path.dirname(sd))))
+    ust = _varsayilan_ust(sd, kok)
+    try:
+        os.makedirs(ust, exist_ok=True)
+        return os.path.join(ust, _ik().klasor_ayir(sd, ust, baslik))
+    except OSError as e:
+        hata(f"iş klasörü açılamadı: {ust} ({e}); --klasor ile yazılabilir bir yol ver")
 
 
 def _davranis_kaydet(sd, tur, ileti):
@@ -137,12 +213,15 @@ def cmd_is_ac(a):
     if klasor:  # I-138 P5: NNN- öneki kilit altında denetlenir; dolu ya da önek yoksa sıradaki numara alınır
         if not os.path.isabs(klasor):  # göreli yol proje köküne göre çözülür (çalışma klasörüne göre değil: alt klasörden çağrı yolu ikiler)
             klasor = os.path.join(os.path.dirname(os.path.dirname(sd)), klasor)
-        yol = os.path.abspath(klasor)
-        neden = _klasor_kok_disi(sd, yol)
-        if neden:
-            _davranis_kaydet(sd, "is-klasoru-yanlis", neden)
-            hata(neden)
-        kok, ad = os.path.split(yol)
+        yol, bilgi = _klasor_kok_disi(sd, os.path.abspath(klasor))
+        if bilgi:
+            print(bilgi, file=sys.stderr)
+        klasor = yol
+    if not klasor:  # I-435 P2: --klasor yok ya da kökün kendisine çevrildi → oturum kökü altında sıradaki NNN
+        klasor = _varsayilan_klasor(sd, a.baslik)
+        print(f"orkestra: iş klasörü: {klasor}", file=sys.stderr)
+    else:
+        kok, ad = os.path.split(klasor)
         try:
             yeni = _ik().klasor_ayir(sd, kok, a.baslik, tercih=ad)
         except OSError:
@@ -1359,7 +1438,8 @@ def kaydet(alt):
     is_ = alt.add_parser("is", help="kalıcı iş katmanı (bir iş birden çok sohbete/karta yayılır)").add_subparsers(dest="alt", required=True)
     ia = is_.add_parser("ac")
     ia.add_argument("baslik")
-    ia.add_argument("--klasor", required=True)
+    ia.add_argument("--klasor", help="iş klasörü; verilmezse oturum kökü altında sıradaki NNN-tarih-slug açılır, "
+                    "oturum kökü dışındaki yol kök altına çevrilir")
     ia.add_argument("--etiket", action="append", default=[])
     ia.add_argument("--kart", action="append", default=[], metavar="JIRA-ANAHTARI",
                     help="işin Jira kart anahtarı (ör. ORKESTRA-19); tekrarlanabilir ya da virgülle ayrılır; is.json 'kart' alanına yazılır")

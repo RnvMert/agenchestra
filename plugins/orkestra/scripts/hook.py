@@ -265,8 +265,27 @@ def _davranis_yaz(tur: str, ileti: str, baglam=None) -> None:
         pass
 
 
+_RED_ARAC = ""   # I-435 P3: PreToolUse'ta kurulur; reddet kaydına araç adı ve kabuk komutu (maskeli) eklenir
+_RED_KOMUT = ""
+_KABUK_ARACLARI = ("Bash", "PowerShell")
+_RED_KOMUT_EN_COK = 200
+
+
+def _red_baglami():
+    """Kapı kararı kaydının bağlamı: araç adı ve kabuk aracında sırdan arındırılmış, kısaltılmış komut."""
+    if not _RED_ARAC:
+        return None
+    b = {"arac": _RED_ARAC}
+    if _RED_ARAC in _KABUK_ARACLARI and _RED_KOMUT:
+        try:
+            b["komut"] = L.maskele(str(_RED_KOMUT))[:_RED_KOMUT_EN_COK]
+        except Exception:
+            b["komut"] = "<maskelenemedi>"  # maskelenemeyen komut ham yazılmaz
+    return b
+
+
 def reddet(neden: str):
-    _davranis_yaz("hook-red", neden)
+    _davranis_yaz("hook-red", neden, _red_baglami())
     L.hook_cikti({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                          "permissionDecisionReason": f"orkestra: {neden}"}})
 
@@ -1162,6 +1181,7 @@ def _main_kopya_kapisi(inp: dict, girdi: dict, arac: str) -> None:
 
 def pre_tool_use(inp: dict):
     global _BEKLEYEN_UYARI, _VARSAYILAN_IZIN, _DURUM_DIZINI, _KULLANICI_MESAJI, _GUNCEL_GIRDI, _IZIN_KIPI
+    global _RED_ARAC, _RED_KOMUT
     _KULLANICI_MESAJI = ""
     _GUNCEL_GIRDI = None
     _IZIN_KIPI = str(inp.get("permission_mode") or "")
@@ -1169,6 +1189,9 @@ def pre_tool_use(inp: dict):
     _VARSAYILAN_IZIN = ""
     _DURUM_DIZINI = ""
     arac = inp.get("tool_name", "")
+    _RED_ARAC = str(arac or "")
+    _g = inp.get("tool_input")
+    _RED_KOMUT = str(_g.get("command") or "") if _RED_ARAC in _KABUK_ARACLARI and isinstance(_g, dict) else ""
     if arac in YAZAN_ARACLAR:  # eklentinin kopyasına yazılan değişiklik eşitlemede silinir (proje orkestralı olmasa da)
         g0 = inp.get("tool_input") or {}
         y0 = g0.get("file_path") or g0.get("notebook_path") or ""

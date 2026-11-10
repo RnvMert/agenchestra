@@ -45,8 +45,10 @@ Kaldırmak için aynı komuta `--kaldir` ekle. Tam kurulum ayrıntısı (özel G
 Her sohbet bir işe bağlanır. Yeni iş açmak için:
 
 ```bash
-orkestra is ac "Kısa iş başlığı" --klasor <görev klasörü>
+orkestra is ac "Kısa iş başlığı" [--klasor <görev klasörü>]
 ```
+
+`--klasor` isteğe bağlıdır. Verilmezse oturum kökü altında sıradaki `NNN-tarih-slug` klasörü açılır (eşleme varsa son işin klasörünün yanında). Oturum kökü dışındaki yol reddedilmez, kök altına çevrilir.
 
 Açık bir işe dönmek için `orkestra is devam <id>` kullan. Büyük işler `/orkestra:is <istek>` ile de başlatılır.
 

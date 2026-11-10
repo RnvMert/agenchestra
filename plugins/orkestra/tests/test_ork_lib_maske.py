@@ -69,3 +69,46 @@ class AltCizgiliOnek(unittest.TestCase):
     def test_stripe_tarzi_anahtar_maskelenir(self):
         # I-224 denetçi kusuru 2: sk_live_ öneki sk- listesinde yoktu
         self.assertNotIn("abcdefghijklmnop1234", L.maskele("anahtar sk_live_abcdefghijklmnop1234 bitti"))
+
+
+class KomutSatiriSirlari(unittest.TestCase):
+    """I-435 P3: kabuk komutundaki bayrak değeri, Authorization başlığı ve tırnaklı değer maskelenir. Değerler sahte."""
+
+    def sizmaz(self, metin, *sirlar):
+        cikti = L.maskele(metin)
+        for s in sirlar:
+            self.assertNotIn(s, cikti, metin)
+        return cikti
+
+    def test_uzun_bayrak_bosluk_deger(self):
+        self.sizmaz("cmd --password hunter2x", "hunter2x")
+        self.sizmaz("tool --api-key 'Sahte Deger 1' --verbose", "Sahte", "Deger 1")
+        self.sizmaz("tool --token SahteBelirtec9 run", "SahteBelirtec9")
+        c = self.sizmaz("tool --secret \"a b c\" --x", "a b c")
+        self.assertIn("--x", c)
+
+    def test_bayrak_sonraki_bayragi_yutmaz(self):
+        self.assertEqual(L.maskele("tool --token --verbose"), "tool --token --verbose")
+
+    def test_kisa_p_parola_baglaminda(self):
+        self.sizmaz("az login -u u1 -p S3cretPw!", "S3cretPw!")
+        self.sizmaz("mysql -u root -pSahteP4ss db", "SahteP4ss")
+        self.sizmaz("docker login -u u1 -p 'Sahte P' reg", "Sahte P")
+
+    def test_kisa_p_parola_disinda_degismez(self):
+        for s in ("psql -h h -p 5432 -d db", "mkdir -p a/b", "ssh -p 2222 host", "mysql -P 3306 -u root"):
+            self.assertEqual(L.maskele(s), s)
+
+    def test_authorization_basligi(self):
+        c = self.sizmaz('curl -H "Authorization: Bearer abc123" x', "abc123")
+        self.assertIn('Authorization: Bearer <gizli>" x', c)
+        self.sizmaz("curl -H 'Authorization: Basic dXNlcjpw' x", "dXNlcjpw")
+
+    def test_tirnakli_deger_tamami(self):
+        self.assertEqual(L.maskele('TOKEN="abc def ghi" run'), "TOKEN=<gizli> run")
+        self.assertEqual(L.maskele("KEY='a b c' run"), "KEY=<gizli> run")
+        self.assertEqual(L.maskele('$env:API_KEY = "x y z"'), "$env:API_KEY = <gizli>")
+
+    def test_benzer_adlar_maskelenmez(self):
+        for s in ("monkey=3", "primary_key=id", "--keyring yol", "passthrough --pass-through x"):
+            self.assertEqual(L.maskele(s), s)

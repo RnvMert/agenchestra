@@ -14,7 +14,7 @@ Ayrıntı (kart alanları, plan yolu, workflow, kapılar, toplama) `${CLAUDE_PLU
 
 ## 0. Hazırlık
 - `orkestra kart liste` ile açık kartlara bak. Orkestra kapalıysa (`bu projede orkestra açık değil`) `/orkestra:baslat` öner ve dur.
-- Bağlı iş: `orkestra is aktif`; yoksa `orkestra is liste`. Açık işin devamıysa `orkestra is devam <id>`, değilse `orkestra is ac <başlık> --klasor <görev klasörü>`. Belirsizse tek soru sor.
+- Bağlı iş: `orkestra is aktif`; yoksa `orkestra is liste`. Açık işin devamıysa `orkestra is devam <id>`, değilse `orkestra is ac <başlık>` (`--klasor` isteğe bağlı; verilmezse türetilir, kök dışı yol kök altına çevrilir). Belirsizse tek soru sor.
 - Sıralı iş (P-005): mevcut durum dosyasını doldur (her iddia dosya:satır ya da komut çıktısı) → `orkestra is belge <id> plan` → `orkestra is todo <id> --ekle "P<n>: …"`. Önceki adım tamam değilse CLI reddeder; durum `orkestra is sira <id>`.
 - Best in class (P-030): her plan maddesi `**Alternatifler:**` taşır (en az iki uygulanabilir yaklaşım, seçim gerekçeli). Plan bitince, onaya sunmadan önce AYRI `orkestra:denetci` çağrılır (`orkestra standart goster best_in_class`); dört soru ✔/✘ ve denetçinin `agent_id`'si plan.md'deki `## Best in class denetimi` bloğuna yazılır. ✘ varsa plan düzeltilir ve denetçi yeniden çağrılır.
 - Üretim noktası (K-006, ADR-0069): `uretim: true` işte her plan maddesi `**Üretim noktası:**` alanını taşır: `Düzeltme: <yer> — <önleme>`, `Kontrol: <yer> — <ne>; Kaynakta çözülmedi çünkü: <neden>` ya da `Yeni yetenek — <gerekçe>`. Önce "bunu üretildiği yerde hiç oluşmadan çözebilir miydik?" sorulur; evetse `Düzeltme` kaynağa yazılır. Denetim bloğuna beşinci satır `**Üretim noktası:** ✔|✘` denetçiden gelir; `plan_eksikleri` eksiği doğrudan reddeder (ihlal modu, gölge yok).

@@ -648,8 +648,18 @@ def tmp_temizle(dizin: str, yas_s: float = 3600.0) -> int:
 
 # ---------------------------------------------------------------- maskeleme
 
+# Değer: tırnaklıysa tırnak içinin tamamı (boşluklu değer yarım kalmasın, I-435), değilse boşluğa kadar.
+_DEGER = r"(\"[^\"\n]*\"|'[^'\n]*'|\S+)"
 _SIR_KALIPLARI = [
-    re.compile(r"(?i)((?:password|passwd|pwd|parola|şifre|sifre|secret|token|api[_-]?key|account[_-]?key)\s*[:=]\s*)(\S+)"),
+    re.compile(r"(?i)((?:password|passwd|pwd|parola|şifre|sifre|secret|token|api[_-]?key|account[_-]?key|\bkey)\s*[:=]\s*)"
+               + _DEGER),
+    # Uzun bayrak + boşluk + değer (--password x, --api-key "x y"); '-' ile başlayan sonraki bayrak değer sayılmaz.
+    re.compile(r"(?i)((?<![\w-])--(?:pass(?:word|wd|phrase)?|pwd|token|secret|client[-_]?secret|api[-_]?key|access[-_]?key"
+               r"|auth[-_]?token|key)\s+)(\"[^\"\n]*\"|'[^'\n]*'|(?!-)\S+)"),
+    # Kısa -p yalnız parola anlamlı komutta (az/docker login, mysql, sshpass); psql -p (port) gibi yerler maskelenmez.
+    re.compile(r"(?i)(\b(?:login|mysql|mysqldump|mysqladmin|sshpass)\b[^\n|;&]*?\s(?-i:-p)\s*)(\"[^\"\n]*\"|'[^'\n]*'|(?!-)\S+)"),
+    # Authorization başlığı: şema (Bearer/Basic/Token...) kısa değerde de maskelenir.
+    re.compile(r"(?i)(authorization\s*[:=]\s*(?:(?:bearer|basic|token|bot|digest)\s+)?)([^\s\"',;]+)"),
     re.compile(r"(?i)(bearer\s+)([A-Za-z0-9._\-]{12,})"),
     re.compile(r"(postgres(?:ql)?://[^:\s/]+:)([^@\s]+)(@)"),
 ]

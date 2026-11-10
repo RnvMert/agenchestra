@@ -109,6 +109,24 @@ class Kurallar(unittest.TestCase):
         metin = "<!-- örnek:\n```markdown\n**A:** a **B:** b\n```\nson -->\n\n**A:** x **B:** y\n"
         self.assertEqual([(i["satir"], i["kural"]) for i in self.tara(metin)], [(7, "coklu_etiket")])
 
+    def test_ozet_tum_ihlalleri_satir_satir_verir(self):
+        """K2 (S1): 4 ihlalli metinde ileti 4 satır; her satırda satır numarası, kural ve ayrıntı."""
+        metin = "**A:** a **B:** b\n\nx; y; z; w\n\n" + "kelime " * 50 + "\n\n**C:** c **D:** d\n"
+        ih = self.tara(metin)
+        self.assertEqual(len(ih), 4)
+        ileti = BB.ozet_satiri("plan.md", ih)
+        satirlar = ileti.split("\n")
+        self.assertEqual(len(satirlar), 4)
+        for s, i in zip(satirlar, ih):
+            self.assertIn(f"satır {i['satir']} {i['kural']}: {i['ayrinti']}", s)
+        self.assertTrue(satirlar[0].startswith("Orkestra biçim (K-005, gölge): plan.md, 4 ihlal: satır 1 coklu_etiket"))
+
+    def test_ozet_en_cok_15_satir(self):
+        ih = [{"satir": n, "kural": "uzun_paragraf", "ayrinti": "kısalt"} for n in range(1, 21)]
+        satirlar = BB.ozet_satiri("plan.md", ih).split("\n")
+        self.assertEqual(len(satirlar), 15)
+        self.assertTrue(satirlar[-1].endswith("(+5 ihlal daha)"))
+
     def test_bozuk_ayar_varsayilana_duser(self):
         d = BB.ayar_oku("/yok/olan/dizin")
         self.assertEqual(BB.mod(d, "yazim_kapisi"), "ihlal")  # eklentinin gönderdiği ayar: ihlal (18.10.2026)
@@ -143,11 +161,63 @@ class GuvenliDuzelt(unittest.TestCase):
     def test_belirsiz_ayirici_bolunmez(self):
         uzun = "x" * 130
         for metin in (f"a · {uzun} · c\n",  # madde çok uzun: cümle olabilir
-                      "a · b · c·d\n",  # boşluksuz '·' da var: ayırıcı kesin değil
-                      "a; b; c; d\n",  # ';' ve (a)(b) listeleri anlam ister
-                      "Şunlar: (a) bir, (b) iki.\n"):
+                      "a · b · c·d\n"):  # boşluksuz '·' da var: ayırıcı kesin değil
             with self.subTest(metin=metin):
                 self.assertEqual(self.duz(metin), (metin, []))
+
+    # --- I-435 P1: sıkışık liste (`;`, (a)(b)) Write'ta madde satırlarına bölünür
+    def test_noktali_virgul_listesi_maddelere_bolunur(self):
+        yeni, d = self.duz("Kapsam: hook; CLI; panel; test\nDevam.\n")
+        self.assertEqual(yeni, "Kapsam:\n\n- hook\n- CLI\n- panel\n- test\n\nDevam.\n")
+        self.assertEqual(d, ["sikisik_liste"])
+        self.assertEqual(self.duz("a; b; c; d\n")[0], "- a\n- b\n- c\n- d\n")
+        self.assertEqual(self.duz("**Kapsam:** a; b; c; d\n")[0], "**Kapsam:**\n\n- a\n- b\n- c\n- d\n")
+        self.assertEqual(self.duz("hook; CLI; panel\n"), ("hook; CLI; panel\n", []))  # iki ';' ihlal değil
+
+    def test_harf_isaretli_liste_maddelere_bolunur(self):
+        yeni, d = self.duz("Şunlar yapılacak: (a) bir, (b) iki ve (c) üç.\n")
+        self.assertEqual(yeni, "Şunlar yapılacak:\n\n- (a) bir\n- (b) iki\n- (c) üç.\n")
+        self.assertEqual(d, ["sikisik_liste"])
+        self.assertEqual(self.duz("(1) bir; (2) iki\n")[0], "- (1) bir\n- (2) iki\n")
+
+    def test_kod_araligindaki_noktali_virgul_bolunmez(self):
+        self.assertEqual(self.duz("a; b; `c; d`; e\n")[0], "- a\n- b\n- `c; d`\n- e\n")
+
+    def test_sikisik_liste_karisik_metinde_ihlal_sifir(self):
+        """K1 (S1b): `;` ve (a)(b) satırları + etiket ihlali tek Write'ta giderilir; CRLF korunur."""
+        metin = ("# Plan\r\n\r\n**Amaç:** a **Neden:** b\r\n\r\n"
+                 "Adımlar: oku; yaz; sına; kaydet\r\n\r\nKarar: (a) eski kalır, (b) yeni eklenir.\r\n")
+        self.assertGreaterEqual(len(BB.yazim_ihlalleri(metin, "plan.md", AYAR)), 3)
+        yeni, d = self.duz(metin)
+        self.assertEqual(BB.yazim_ihlalleri(yeni, "plan.md", AYAR), [])
+        self.assertEqual(sorted(d), ["etiket_ayir", "sikisik_liste", "sikisik_liste"])
+        self.assertNotIn("\n", yeni.replace("\r\n", ""))  # çıplak LF yok
+        self.assertIn("- oku\r\n- yaz\r\n- sına\r\n- kaydet\r\n", yeni)
+        self.assertIn("- (a) eski kalır\r\n- (b) yeni eklenir.\r\n", yeni)
+
+    def test_sikisik_liste_belirsizse_orijinal_doner(self):
+        """K3: ondalık, URL, tırnak/kod, foo(a)(b), sırasız işaret, cümle sınırı, korunan blok, uzun paragraf."""
+        uzun = "kelime " * 50
+        for metin in ("Oranlar 0;5 1;5 2;5 3;5\n",  # ondalık: boşluksuz ';'
+                      "Bkz. https://x.example/a;b;c;d sonu.\n",  # URL içi ';'
+                      'Komut "a; b; c; d" çalışır.\n',  # tırnak içi
+                      "`a;b`;c;d;e\n",  # kod aralığı + boşluksuz ayırıcı
+                      "Çağrı foo(a)(b) döner.\n",  # işlev çağrısı
+                      "Not: (a) bir, (c) iki.\n",  # sırasız işaret
+                      "a; b. Sonra c; d; e\n",  # madde içinde cümle sınırı
+                      "Şunlar: (a) bir. Sonra (b) iki.\n",
+                      "Seçim (a) ile (b) arasında yapılır.\n",  # ayraçsız işaretler: atıf, liste değil
+                      "a; b; c;\n",  # boş son madde
+                      "```\na; b; c; d\n(a) x (b) y\n```\n\n" + uzun + "\n",  # korunan blok + düzeltilemez ihlal
+                      "Adımlar: oku; yaz; sına; kaydet\n\n" + uzun + "\n"):  # düzeltilebilir + uzun paragraf: hepsi ya da hiçbiri
+            with self.subTest(metin=metin[:40]):
+                self.assertEqual(self.duz(metin), (metin, []))
+
+    def test_kod_citi_icindeki_sikisik_liste_dokunulmaz(self):
+        cit = "```\na; b; c; d\n(a) x (b) y\n```\n\n"
+        yeni, d = self.duz(cit + "Adımlar: oku; yaz; sına; kaydet\n")
+        self.assertEqual(yeni, cit + "Adımlar:\n\n- oku\n- yaz\n- sına\n- kaydet\n")
+        self.assertEqual(d, ["sikisik_liste"])
 
     def test_crlf_korunur(self):
         yeni, d = self.duz("**A:** a **B:** b\r\nson\r\n")
@@ -239,9 +309,13 @@ class Kancalar(unittest.TestCase):
 
     def test_ihlal_modunda_yazim_reddedilir_bastirma_gecer(self):
         self.ayar_yaz(yazim_kapisi="ihlal")
-        c = self.yaz("is1/plan.md", IHLALLI)
+        # IHLALLI tek başına güvenli düzeltmeyle geçer (I-435 P1); uzun paragraf eklenince düzeltilemez, ret kalır
+        c = self.yaz("is1/plan.md", IHLALLI + "\n" + "kelime " * 50 + "\n")
         self.assertEqual(self.karar(c), "deny")
-        self.assertIn("satır 3 coklu_etiket", c["hookSpecificOutput"]["permissionDecisionReason"])
+        neden = c["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("satır 3 coklu_etiket", neden)
+        self.assertIn("satır 5 sikisik_liste", neden)  # tüm ihlaller tek seferde
+        self.assertIn("satır 7 uzun_paragraf", neden)
         self.assertEqual(self.yaz("is1/plan.md", "a; b; c; d <!-- biçim-tamam -->\n"), {})
         self.assertEqual(self.ihlaller("belge_bicim")[0]["mod"], "ihlal")
 

@@ -201,6 +201,63 @@ class RetBaglami(unittest.TestCase):
             self.assertEqual(s["ret_sinif"], "siniflanmamis")
 
 
+class RedKaydiAracKomut(unittest.TestCase):
+    """I-435 P3 (S3): reddet kaydı baglam.arac ve kabukta maskeli baglam.komut taşır; karar çıktısı değişmez."""
+
+    def _pre_tool_use_girdisi(self, inp):
+        """pre_tool_use girişte araç/komut durumunu kurar; durum dizini yok → hemen geçer (çıkış yakalanır)."""
+        with mock.patch.object(hook.L, "durum_dizini", return_value=""), \
+                mock.patch.object(hook, "_pre_cikti", side_effect=SystemExit(0)):
+            with self.assertRaises(SystemExit):
+                hook.pre_tool_use(inp)
+
+    def _reddet(self, sd, neden="orkestra: K-003: x"):
+        out = io.StringIO()
+        with mock.patch.object(hook, "_DURUM_DIZINI", sd), mock.patch("sys.stdout", out), \
+                self.assertRaises(SystemExit) as c:
+            hook.reddet(neden)
+        self.assertIn(c.exception.code, (None, 0))
+        return json.loads(out.getvalue())
+
+    def test_reddet_baglam_arac_dolu(self):
+        with tempfile.TemporaryDirectory() as sd:
+            self._pre_tool_use_girdisi({"tool_name": "Write", "tool_input": {"file_path": "a/plan.md", "content": "x"}})
+            karar = self._reddet(sd)
+            (s,) = satirlar(sd)
+            self.assertEqual(s["tur"], "hook-red")
+            self.assertEqual(s["baglam"]["arac"], "Write")
+            self.assertNotIn("komut", s["baglam"])   # kabuk dışı araçta komut yok
+            ho = karar["hookSpecificOutput"]
+            self.assertEqual((ho["permissionDecision"], ho["permissionDecisionReason"]),
+                             ("deny", "orkestra: orkestra: K-003: x"))
+
+    def test_kabuk_komutu_maskeli(self):
+        sahte_anahtar = "abc123secretSAHTE"
+        sahte_parola = "SahteParola99"
+        komut = (f"API_KEY={sahte_anahtar} psql postgres://kullanici:{sahte_parola}@sunucu.local/db "
+                 "&& echo " + "z" * 400)
+        with tempfile.TemporaryDirectory() as sd:
+            self._pre_tool_use_girdisi({"tool_name": "Bash", "tool_input": {"command": komut}})
+            self._reddet(sd)
+            with open(os.path.join(sd, "hata.jsonl"), encoding="utf-8") as f:
+                ham = f.read()
+            self.assertNotIn(sahte_anahtar, ham)
+            self.assertNotIn(sahte_parola, ham)
+            (s,) = satirlar(sd)
+            b = s["baglam"]
+            self.assertEqual(b["arac"], "Bash")
+            self.assertIn("<gizli>", b["komut"])
+            self.assertIn("postgres://kullanici:<gizli>@", b["komut"])
+            self.assertLessEqual(len(b["komut"]), hook._RED_KOMUT_EN_COK)
+
+    def test_kayit_patlarsa_karar_cikar(self):
+        with tempfile.TemporaryDirectory() as sd:
+            self._pre_tool_use_girdisi({"tool_name": "PowerShell", "tool_input": {"command": "Get-Item x"}})
+            with mock.patch.object(HK, "davranis", side_effect=RuntimeError("x")):
+                karar = self._reddet(sd)
+            self.assertEqual(karar["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
 class EskiBicim(unittest.TestCase):
     """I-224: ret bağlamsız eski satırlar okunur kalır; deneme sayımı onları saymaz, birleştirici bozulmaz."""
 

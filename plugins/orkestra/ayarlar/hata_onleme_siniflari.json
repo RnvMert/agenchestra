@@ -9,7 +9,7 @@
      "cozum": "iş açılınca onay durumu ve yazılabilir belge listesi bağlama girer; ajan belge dışı yazmayı denemeden bilir"},
     {"desen": "^is-klasoru-yanlis: iş klasörü oturum kökü dışında",
      "kaynak": "betik", "onlenebilir": "L1", "sahip": "scripts/komutlar/isler.py (is ac klasör çözümü)",
-     "cozum": "iş klasörü oturum kökünden türetilir; --klasor yolu verilmezse ya da kök dışındaysa önerilen yol kendiliğinden kullanılır"},
+     "cozum": "uygulandı (I-435 P2): --klasor isteğe bağlı, verilmezse oturum kökü altında (baglam.json eşlemesi varsa son işin üst klasöründe) sıradaki NNN türetilir; kök dışı --klasor reddedilmez, kök altına çevrilir. Desen eski kayıtları sınıflamak için kalır"},
     {"desen": "^hook-red: auto modunda kullanıcıya soru sorulmaz",
      "kaynak": "kural", "onlenebilir": "L4", "sahip": "scripts/hook.py (_auto_soru_kapisi)",
      "cozum": "auto modunda tur başı bağlamı soru aracı yerine 'Otomatik kararlar' yazımını söyler"},

@@ -96,12 +96,14 @@ class BelgeBaglantiWorktree(unittest.TestCase):
         self.assertIn("](Claude_Orkestrasyon/001-20261022-deneme/plan_gorunum.md)", b.stdout)  # ADR-0127
         self.assertNotIn(".claude/worktrees", b.stdout)
 
-    def test_kok_disi_klasor_worktree_oturumunda_reddedilir(self):
+    def test_kok_disi_klasor_worktree_oturumunda_kok_altina_cevrilir(self):
         klasor = os.path.join(self.ana, "Claude_Orkestrasyon", "002-20261022-dis")
         r = self._is_ac(klasor, self.wt)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("oturum kökü dışında", r.stderr)
-        self.assertIn(os.path.join(self.wt, "Claude_Orkestrasyon", "002-20261022-dis"), r.stderr)  # önerilen yol
+        self.assertEqual(r.returncode, 0, r.stderr)  # I-435 P2: reddedilmez, kök altına çevrilir
+        self.assertIn("oturum kökü altına çevrildi", r.stderr)
+        hedef = os.path.join(self.wt, "Claude_Orkestrasyon", "002-20261022-dis")
+        self.assertIn(hedef, r.stderr)
+        self.assertTrue(os.path.isdir(hedef))
         self.assertFalse(os.path.exists(klasor))
 
     def test_kok_disi_klasor_ortamla_kapatilabilir(self):

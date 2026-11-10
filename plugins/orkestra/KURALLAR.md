@@ -107,7 +107,7 @@ Her projede geçerlidir. Projeye özgü bilgi bu dosyaya girmez; o kısım proje
 - Kuralları mevcut LLM etiketleriyle karşılaştırarak doğrula.
 
 ## Odak ve sıradaki adımlar
-- Her sohbet ilk işte bir işe bağlanır: mevcut işse `orkestra is devam <id>`, yeni işse `orkestra is ac <başlık> --klasor <görev klasörü>`. Sıradaki adımlar sohbet hafızasında değil işin todo.md'sinde tutulur: ortaya çıkınca `orkestra is todo <id> --ekle "…"`, bitince `orkestra is todo <id> --bitti <n|parça> [--not]`; yeni sohbet listeyi oradan okuyup devam eder. Not: is todo birden çok --bitti/--ekle alabilir; art arda todo yazmalarını tek çağrıda birleştir.
+- Her sohbet ilk işte bir işe bağlanır: mevcut işse `orkestra is devam <id>`, yeni işse `orkestra is ac <başlık> [--klasor <görev klasörü>]` (`--klasor` isteğe bağlı: verilmezse oturum kökü altında sıradaki NNN klasörü türetilir; kök dışı yol kök altına çevrilir). Sıradaki adımlar sohbet hafızasında değil işin todo.md'sinde tutulur: ortaya çıkınca `orkestra is todo <id> --ekle "…"`, bitince `orkestra is todo <id> --bitti <n|parça> [--not]`; yeni sohbet listeyi oradan okuyup devam eder. Not: is todo birden çok --bitti/--ekle alabilir; art arda todo yazmalarını tek çağrıda birleştir.
 - Yanıt sonunda "sıradaki adım" yazma.
 - Sıradaki adımları `orkestra is todo <id> --ekle` ile işin `todo.md` dosyasına yaz.
 - Yalnız kullanıcıdan karar ya da onay gerekiyorsa bunu tek cümleyle söyle.

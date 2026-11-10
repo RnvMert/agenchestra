@@ -173,8 +173,8 @@ def yazim_ihlalleri(metin: str, dosya_adi: str, ayar: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------- güvenli düzeltme (I-224 P9)
-# Yalnız anlamı değiştirmeyen, ayırıcısı kesin dönüşümler. Uzun paragraf / uzun todo maddesi (kısaltma ister),
-# `;` ve (a)(b) listeleri (ayırıcı belirsiz) düzeltilmez. Kod bloğu, HTML yorumu, tablo, başlık, alıntı, HTML satırı,
+# Yalnız anlamı değiştirmeyen, ayırıcısı kesin dönüşümler. Uzun paragraf / uzun todo maddesi (kısaltma ister)
+# düzeltilmez; `;` ve (a)(b) listeleri yalnız ayırıcı kesinse bölünür (I-435 P1). Kod bloğu, HTML yorumu, tablo, başlık, alıntı, HTML satırı,
 # YAML ön bilgisi, girintili satır ve liste maddesine dokunulmaz.
 
 _KESIN_ETIKET = re.compile(r"\*\*[^*\n]{1,40}?:\*\*(?=\s|$)")  # yalnız '**Etiket:**' biçimi
@@ -257,6 +257,82 @@ def _nokta_bol(s: str, en_az: int) -> list[str] | None:
     return ([onek, ""] if onek else []) + [f"- {x}" for x in maddeler]
 
 
+# Sıkışık liste (I-435 P1): `a; b; c` ve `(a) x, (b) y` satırları madde satırlarına bölünür. Ayırıcı kesin değilse
+# (boşluksuz `;`, `foo(a)(b)`, sırasız işaret, madde içinde cümle sonu, uzun madde) dönüştürülmez.
+_TIRNAK_URL = re.compile(r'"[^"\n]*"|“[^”\n]*”|«[^»\n]*»|\b(?:https?|ftp)://\S+')
+_CUMLE_SONU = re.compile(r"[.!?]\s+\S")
+_AYIRAC_SONU = re.compile(r"(?:[,;]|\s(?:ve|veya|ya da|and|or))\s*$")
+_BAGLAC_SONU = re.compile(r"(?:\s*[,;])?(?:\s+(?:ve|veya|ya da|and|or))?\s*[,;]?\s*$")
+
+
+def _sikisik_maske(s: str) -> str:
+    """`_maske` + tırnak içi ve çıplak URL; konum korunur."""
+    return _TIRNAK_URL.sub(lambda m: "\0" * len(m.group(0)), _maske(s))
+
+
+def _onek_ayir(ilk: str) -> tuple[str, str]:
+    o = _ONEK.match(ilk)
+    return (o.group(0), ilk[o.end():].strip()) if o else ("", ilk)
+
+
+def _sirali(isaretler: list[str]) -> bool:
+    """(a)(b)(c) ya da (1)(2)(3): ardışık ve aynı türden."""
+    if all(x.isdigit() for x in isaretler):
+        return all(int(b) == int(a) + 1 for a, b in zip(isaretler, isaretler[1:]))
+    if all(len(x) == 1 and x.isalpha() for x in isaretler) and len({x.islower() for x in isaretler}) == 1:
+        return all(ord(b) == ord(a) + 1 for a, b in zip(isaretler, isaretler[1:]))
+    return False
+
+
+def _harf_bol(s: str, m: str, en_az: int) -> list[str] | None:
+    """'Önek: (a) x, (b) y ve (c) z.' → ['Önek:', '', '- (a) x', '- (b) y', '- (c) z.']; işaret kalmıyorsa None."""
+    isaret = list(_HARF_ISARETI.finditer(m))
+    if len(isaret) < en_az:
+        return None
+    if any(i.start() > 0 and not m[i.start() - 1].isspace() for i in isaret):
+        return None  # foo(a)(b), x(1): işlev çağrısı ya da dipnot olabilir
+    if not _sirali([i.group(0)[1:-1] for i in isaret]):
+        return None
+    onek = s[:isaret[0].start()].strip()
+    sinir = [i.start() for i in isaret] + [len(s)]
+    maddeler = [s[a:b].strip() for a, b in zip(sinir, sinir[1:])]
+    if not all(_AYIRAC_SONU.search(x) for x in maddeler[:-1]):
+        return None  # '(a) ile (b) arasında': işaretler ayraçla ayrılmıyor, liste değil atıf olabilir
+    maddeler = [_BAGLAC_SONU.sub("", x) if k < len(maddeler) - 1 else x for k, x in enumerate(maddeler)]
+    return _madde_satirlari(onek, maddeler, isaretli=True)
+
+
+def _noktali_bol(s: str, m: str, en_az: int) -> list[str] | None:
+    """'Önek: a; b; c' → ['Önek:', '', '- a', '- b', '- c']; her `;` boşlukla izlenmiyorsa None."""
+    yerler = [i for i, c in enumerate(m) if c == ";"]
+    if len(yerler) < en_az or any(i + 1 < len(m) and not m[i + 1].isspace() for i in yerler):
+        return None  # 1;5, a;b: ondalık/kod gibi; ayırıcı kesin değil
+    sinir = [0] + [i + 1 for i in yerler]
+    maddeler = [s[a:(yerler[k] if k < len(yerler) else len(s))].strip() for k, a in enumerate(sinir)]
+    onek, maddeler[0] = _onek_ayir(maddeler[0])
+    return _madde_satirlari(onek, maddeler)
+
+
+def _madde_satirlari(onek: str, maddeler: list[str], isaretli: bool = False) -> list[str] | None:
+    if any(not x or len(x) > _NOKTA_MADDE_AZAMI for x in maddeler):
+        return None
+    if isaretli and any(_HARF_ISARETI.fullmatch(x) for x in maddeler):
+        return None  # boş işaretli madde
+    if any(_CUMLE_SONU.search(_maske(x)) for x in maddeler):
+        return None  # madde içinde cümle bitip yenisi başlıyor: liste sınırı belirsiz
+    return ([onek, ""] if onek else []) + [f"- {x}" for x in maddeler]
+
+
+def _sikisik_bol(s: str, en_az: int, noktali_en_az: int) -> list[str] | None:
+    """Sıkışık liste satırını madde satırlarına böler; ayırıcı belirsizse None (satır olduğu gibi kalır)."""
+    m = _sikisik_maske(s)
+    if len(_HARF_ISARETI.findall(m)) >= en_az:
+        return _harf_bol(s, m, en_az)
+    if m.count(";") >= noktali_en_az:
+        return _noktali_bol(s, m, noktali_en_az)
+    return None
+
+
 def _donustur(metin: str, ayar: dict) -> tuple[str, list[dict]]:
     k = ayar.get("yazim_kapisi") or {}
     bastirma = k.get("bastirma_isareti") or "<!-- biçim-tamam -->"
@@ -265,6 +341,7 @@ def _donustur(metin: str, ayar: dict) -> tuple[str, list[dict]]:
     except re.error:
         yok_say = None
     en_az = int(k.get("sikisik_liste_en_az") or 2)
+    noktali_en_az = int(k.get("noktali_virgul_en_az") or 3)
     satirlar = metin.split("\n")
     korunan = _korunan_satirlar(satirlar)
     bloklar: list[tuple[list[str], bool]] = []  # (kaynak satırın yerini alan satırlar, ardına boş satır gerekir mi)
@@ -281,6 +358,10 @@ def _donustur(metin: str, ayar: dict) -> tuple[str, list[dict]]:
             nb = _nokta_bol(p, en_az)
             if nb:
                 donusum.append("nokta_liste")
+            else:
+                nb = _sikisik_bol(p, en_az, noktali_en_az)
+                if nb:
+                    donusum.append("sikisik_liste")
             if yeni:
                 yeni.append("")
             yeni.extend(nb or [p])
@@ -291,7 +372,7 @@ def _donustur(metin: str, ayar: dict) -> tuple[str, list[dict]]:
             yeni.insert(0, "")
         if donusum:
             uygulanan.extend({"satir": no, "donusum": d} for d in donusum)
-        bloklar.append((yeni, "nokta_liste" in donusum))
+        bloklar.append((yeni, "nokta_liste" in donusum or "sikisik_liste" in donusum))
     # Üretilen madde listesinin ardındaki dolu satır son maddeye yapışmasın (Markdown tembel devam): araya boş satır.
     cikti: list[str] = []
     for i, (b, _) in enumerate(bloklar):
@@ -303,7 +384,7 @@ def _donustur(metin: str, ayar: dict) -> tuple[str, list[dict]]:
 
 def guvenli_duzelt(metin: str, dosya_adi: str = "plan.md", ayar: dict | None = None) -> tuple[str, list[dict]]:
     """K-005 ihlalli metne yalnız güvenli dönüşümleri uygular → (yeni_metin, uygulananlar).
-    Uygulananlar: [{satir, donusum}] (donusum: etiket_ayir | bos_satir | nokta_liste). Hepsi ya da hiçbiri:
+    Uygulananlar: [{satir, donusum}] (donusum: etiket_ayir | bos_satir | nokta_liste | sikisik_liste). Hepsi ya da hiçbiri:
     metin ihlalsizse, dönüşüm yoksa ya da dönüşüm sonrası hâlâ ihlal kalıyorsa orijinal metin ve [] döner.
     İdempotent: sonuç ihlalsiz olduğundan ikinci uygulama metni değiştirmez."""
     ayar = ayar if ayar is not None else ayar_oku(None)
@@ -331,11 +412,15 @@ def duzelt_acik(sd=None) -> bool:
     return m == "acik"
 
 
-def ozet_satiri(dosya_adi: str, ihlaller: list[dict], en_cok: int = 3) -> str:
-    """Tek satırlık uyarı: ilk ihlaller satır numarasıyla."""
-    parca = ", ".join(f"satır {i['satir']} {i['kural']}" for i in ihlaller[:en_cok])
-    ek = f" (+{len(ihlaller) - en_cok})" if len(ihlaller) > en_cok else ""
-    return f"Orkestra biçim (K-005, gölge): {dosya_adi}: {parca}{ek}. Ayrıntı: {ihlaller[0]['ayrinti']}."
+def ozet_satiri(dosya_adi: str, ihlaller: list[dict], en_cok: int = 15) -> str:
+    """Uyarı/ret iletisi: ihlal başına bir satır (en çok `en_cok`), satır numarası, kural ve ayrıntıyla; tümü tek
+    seferde verilir ki düzeltme tek turda bitsin (I-435 P1). İlk satır başlığı taşır; fazlası son satırda (+N)."""
+    gosterilen = ihlaller[:en_cok]
+    satirlar = [f"satır {i['satir']} {i['kural']}: {i['ayrinti']}" for i in gosterilen]
+    satirlar[0] = f"Orkestra biçim (K-005, gölge): {dosya_adi}, {len(ihlaller)} ihlal: {satirlar[0]}"
+    if len(ihlaller) > en_cok:
+        satirlar[-1] += f" (+{len(ihlaller) - en_cok} ihlal daha)"
+    return "\n".join(satirlar)
 
 
 def baglantisiz_belgeler(dokunulan, yanit: str, ayar: dict) -> list[str]:
