@@ -129,6 +129,10 @@ def _davranis_kaydet(sd, tur, ileti):
 
 def cmd_is_ac(a):
     sd = sd_gerekli()
+    try:  # I-433 (ORKESTRA-19): kart anahtarı klasör ayrılmadan önce doğrulanır
+        kart = _ik().jira_kartlari(getattr(a, "kart", None))
+    except ValueError as e:
+        hata(str(e))
     klasor = a.klasor
     if klasor:  # I-138 P5: NNN- öneki kilit altında denetlenir; dolu ya da önek yoksa sıradaki numara alınır
         if not os.path.isabs(klasor):  # göreli yol proje köküne göre çözülür (çalışma klasörüne göre değil: alt klasörden çağrı yolu ikiler)
@@ -148,7 +152,7 @@ def cmd_is_ac(a):
             print(f"orkestra: klasör numarası dolu ya da eksik ({ad}); yeni klasör: {klasor}", file=sys.stderr)
     try:
         kayit = _ik().is_ac(sd, a.baslik, klasor, a.etiket, dogrulama=False if a.dogrulamasiz else None,
-                            devral=a.devral, kademe="kucuk" if a.kucuk else None)
+                            devral=a.devral, kademe="kucuk" if a.kucuk else None, kart=kart)
     except _ik().IsKlasoruHatasi as e:
         _davranis_kaydet(sd, "is-klasoru-yanlis", str(e))
         hata(str(e))
@@ -1357,6 +1361,8 @@ def kaydet(alt):
     ia.add_argument("baslik")
     ia.add_argument("--klasor", required=True)
     ia.add_argument("--etiket", action="append", default=[])
+    ia.add_argument("--kart", action="append", default=[], metavar="JIRA-ANAHTARI",
+                    help="işin Jira kart anahtarı (ör. ORKESTRA-19); tekrarlanabilir ya da virgülle ayrılır; is.json 'kart' alanına yazılır")
     ia.add_argument("--devral", action="store_true",
                     help="klasörde başka işin is.json'u varsa reddetmek yerine devral (yedek alır, oturumları ve kimliği yeni işe bağlar)")
     ia.add_argument("--dogrulamasiz", action="store_true", help="plan ✅/❌ doğrulama bayrağı ve şablonu konmaz (eski plan şablonu)")

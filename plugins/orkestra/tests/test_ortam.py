@@ -86,7 +86,8 @@ class Runner(unittest.TestCase):
         self.assertIn("başlatılamadı", cikti)
 
     def test_var_olan_arac_calisir(self):
-        kod, cikti = O.varsayilan_runner([sys.executable, "-c", "print(1)"], tempfile.gettempdir(), dict(os.environ))
+        # -I: makinedeki kullanıcı site-packages (bozuk .pth) uyarısı birleşik çıktıya karışmaz
+        kod, cikti = O.varsayilan_runner([sys.executable, "-I", "-c", "print(1)"], tempfile.gettempdir(), dict(os.environ))
         self.assertEqual((kod, cikti.strip()), (0, "1"))
 
 

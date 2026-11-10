@@ -536,7 +536,7 @@ class OtomatikYonlendirme(_Ortak):
     def test_bagli_oturumda_otomatik_islem_yok_ve_k004_ipucu_surer(self):
         self.baglan(self.fatura)
         once = self._is_idleri()
-        yok_say = ("istek_sira", "istek_tur", "son_istek_id")
+        yok_say = ("istek_sira", "istek_tur", "son_istek_id", "son_istek_ne")  # son_istek_ne: güncel konu (I-433)
 
         def karsilastirilacak():
             return {k: v for k, v in self.oturum_json().items() if k not in yok_say}

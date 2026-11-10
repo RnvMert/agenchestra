@@ -95,6 +95,16 @@ def ana_agac_koku(d: str) -> str | None:
     return os.path.dirname(ortak)
 
 
+def _gecici_sinir(baslangic: str) -> str | None:
+    """Başlangıç yolu sistem geçici klasörünün (tempfile.gettempdir) ALTINDAYSA o klasörün normalize yolu; değilse None.
+    Geçici klasör kendisi proje değildir: oraya bir kez yazılmış `.claude/orkestra` (ör. cwd'si geçici kök olan bir
+    çağrı) altındaki her geçici klasörü o sahte projeye bağlardı ve yeni projede `baslat` yanlış kökü açardı (I-433).
+    Yukarı yürüyüş bu sınırda durur; geçici klasörün altındaki gerçek projeler etkilenmez."""
+    tmp = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+    d = os.path.normcase(os.path.abspath(baslangic))
+    return tmp if d != tmp and d.startswith(tmp.rstrip("\\/") + os.sep) else None
+
+
 def proje_dizini(cwd: str | None = None, ortami_yoksay: bool = False) -> str:
     """CLAUDE_PROJECT_DIR > cwd'den yukarı .claude/orkestra arayışı > cwd. Bulunan klasör bağlı bir git worktree'siyse
     (oturum worktree'si: durum kopyası git dışı olduğundan ayrışır) ve ana ağaçta durum klasörü varsa ana ağaç döner;
@@ -102,10 +112,13 @@ def proje_dizini(cwd: str | None = None, ortami_yoksay: bool = False) -> str:
     `ortami_yoksay=True` verilen yolu esas alır (plan klasörü gibi açık bir yolun kökü: ortam onu ezmez); iç içe
     `.claude/agent-memory` klasörleri kök sayılmaz, yalnız `.claude/orkestra` taşıyan klasör sayılır."""
     baslangic = (None if ortami_yoksay else os.environ.get("CLAUDE_PROJECT_DIR")) or cwd or os.getcwd()
+    sinir = _gecici_sinir(baslangic)
     # Açık yolda durum klasörü hiç yoksa (çıplak proje) en yakın `.claude` yedek işaret olur; ortamdan gelen yolda olmaz.
     for isaret in ([os.path.join(".claude", "orkestra")] + ([".claude"] if ortami_yoksay else [])):
         d = os.path.abspath(baslangic)
         while True:
+            if sinir and os.path.normcase(d) == sinir:
+                break  # geçici kök ve üstü proje sayılmaz (bkz. _gecici_sinir)
             if os.path.isdir(os.path.join(d, isaret)):
                 if isaret != ".claude" and os.environ.get(DURUM_YEREL_ORTAM) != "1":
                     ana = ana_agac_koku(d)
@@ -327,13 +340,54 @@ def kayit_surumu(kayit) -> int:
         return 0
 
 
+class KokUyusmazligi(ValueError):
+    """I-433: kayıt başka bir projenin köküyle yazılmak istendi (günlük o projeye ait değil)."""
+
+
+KOK_DAMGALI_TURLER = ("kural_ihlal",)  # I-433: proje kökü alanı taşıyan kayıt türleri
+
+
+def gunluk_koku(yol: str) -> str | None:
+    """`<kök>/.claude/orkestra/<dosya>` biçimindeki günlük yolunun proje kökü; başka biçimde None."""
+    d = os.path.dirname(os.path.abspath(yol))
+    if os.path.basename(d) == "orkestra" and os.path.basename(os.path.dirname(d)) == ".claude":
+        return os.path.dirname(os.path.dirname(d))
+    return None
+
+
+def _ayni_proje(kok: str, proje: str) -> bool:
+    """kok, proje kökü ya da altındaysa (oturum worktree'si dahil) ya da projenin bağlı bir worktree'siyse True."""
+    n = lambda x: os.path.normcase(os.path.abspath(x))  # noqa: E731
+    k, p = n(kok), n(proje)
+    if k == p or k.startswith(p.rstrip(os.sep) + os.sep):
+        return True
+    ana_k, ana_p = ana_agac_koku(os.path.abspath(kok)), ana_agac_koku(os.path.abspath(proje))
+    return bool(ana_k and n(ana_k) == p) or bool(ana_p and n(ana_p) == k)
+
+
+def _kok_damgala(yol: str, kayit: dict) -> dict:
+    """I-433: kural_ihlal kaydına günlüğün proje kökünü `kok` alanı olarak yazar; kayıt başka bir projenin kökünü taşıyorsa
+    KokUyusmazligi fırlatır (kayıt yazılmaz). Kök çıkarılamayan yolda (proje dışı günlük) kayda dokunmaz."""
+    if kayit.get("tur") not in KOK_DAMGALI_TURLER:
+        return kayit
+    proje = gunluk_koku(yol)
+    if not proje:
+        return kayit
+    verilen = kayit.get("kok")
+    if verilen and not _ayni_proje(str(verilen), proje):
+        raise KokUyusmazligi(f"kayıt başka projeye ait: kok={verilen}, günlük={proje}")
+    return {**kayit, "kok": proje}
+
+
 def jsonl_ekle(yol: str, kayit: dict) -> None:
+    kayit = _kok_damgala(yol, kayit)
     sona_ekle(yol, json.dumps({"v": KAYIT_SURUMU, **kayit}, ensure_ascii=False) + "\n")
 
 
 def jsonl_toplu_ekle(yol: str, kayitlar: list[dict]) -> None:
     """Çok satırı tek sona_ekle çağrısıyla ekler (tek kilit, tek açma); boş listede dosyaya dokunmaz."""
     if kayitlar:
+        kayitlar = [_kok_damgala(yol, k) for k in kayitlar]
         sona_ekle(yol, "".join(json.dumps({"v": KAYIT_SURUMU, **k}, ensure_ascii=False) + "\n" for k in kayitlar))
 
 
@@ -377,6 +431,26 @@ def istek_id_yeni(sd, oturum):
             return kimlik
     except Exception:
         return None
+
+
+def istek_konusu_degistir(sd, oturum, ne):
+    """I-433 (ORKESTRA-20): oturumun son kullanıcı mesajı özetini (`son_istek_ne`) `ne` ile değiştirir, öncekini döndürür.
+    Hook bunu yeni mesajdan önceki "güncel konu" olarak kullanır (eski niyet kaydı yerine). Hata durumunda ''."""
+    try:
+        if not sd or not oturum:
+            return ""
+        yol = _oturum_json_yol(sd, oturum)
+        with kilit(yol):
+            durum, d = _oturum_json_oku(yol)
+            if durum == "bozuk":
+                return ""
+            onceki = str(d.get("son_istek_ne") or "")
+            if ne:
+                d["son_istek_ne"] = str(ne)
+                atomik_yaz(yol, json.dumps(d))
+            return onceki
+    except Exception:
+        return ""
 
 
 def istek_id_oku(sd, oturum):

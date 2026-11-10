@@ -32,8 +32,9 @@ def test_varsayilan_py313_ya_da_sys_executable(monkeypatch):
 
 
 def test_kapi_secilen_yorumlayiciyi_alt_sureclere_verir(monkeypatch, tmp_path):
+    # -I: makinedeki kullanıcı site-packages (bozuk .pth) uyarısı birleşik çıktıya karışmaz; ortam değişkeni yine geçer
     monkeypatch.setenv("ORKESTRA_PYTHON", sys.executable)
-    kod, cikti, _ = L.kabuk_kos(f'"{sys.executable}" -c "import os;print(os.environ[\'ORKESTRA_PYTHON\'])"', str(tmp_path), 60)
+    kod, cikti, _ = L.kabuk_kos(f'"{sys.executable}" -I -c "import os;print(os.environ[\'ORKESTRA_PYTHON\'])"', str(tmp_path), 60)
     assert kod == 0 and cikti.strip() == sys.executable
 
 

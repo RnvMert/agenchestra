@@ -84,3 +84,4 @@ Kaynak: depo kökündeki `adr/`.
 | [ADR-0172](../../../../adr/ADR-0172-cursor-kurulum-dogrulamasi-komut-yazimi-ve-hosttan-bagimsiz-oturum-kimligi.md) | Cursor kurulumu: komut yazımı, tek uçuş, kopya eşleme, dinamik sonda ve host'tan bağımsız oturum kimliği | Kabul edildi |
 | [ADR-0173](../../../../adr/ADR-0173-bagsiz-yazmada-tek-net-eslesmede-baglanma-yazma-kurali-baglami-cursor-rol-alani.md) | Bağsız yazmada tek net eşleşmede bağlanma, yazma kuralı bağlamı, Cursor rol alanı | Kabul edildi |
 | [ADR-0174](../../../../adr/ADR-0174-arsivli-oturum-surecini-bakimda-resume-kimligiyle-kapat-golge-modda-baslar.md) | Arşivli oturum sürecini bakımda `--resume` kimliğiyle kapat, gölge modda başlar | Kabul edildi |
+| [ADR-0175](../../../../adr/ADR-0175-izin-ezmesi-birlestirir-test-gecici-kokte-durur-belge-iceren-worktree-silinmez.md) | İzin ezmesi varsayılanla birleşir, proje kökü taraması geçici kökte durur, belge içeren worktree silinmez | Kabul edildi |

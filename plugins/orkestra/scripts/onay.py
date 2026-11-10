@@ -287,6 +287,26 @@ def _kural_dosya_metni(sd: str) -> str:
 
 
 OZET_ENCOK = 400  # kural özetinin karakter üst sınırı (tests/test_kural_ozet.py zorlar)
+
+
+def _ozet_belirle(metin: str, ozet: str | None) -> str:
+    """Eklenti kuralının her oturumda yüklenen özetini yazım anında belirler (I-433: P-061 özetsiz eklendi, md'ye
+    700+ karakterlik tam metin girdi). Verilen özet kısa olmalı ve metindeki ORKESTRA_* belirteçlerini korumalı;
+    özet yoksa kısa metin özet olur, uzun metin reddedilir."""
+    metin = _tek_satir(metin)
+    o = _tek_satir(ozet) if ozet else ""
+    if not o:
+        if len(metin) > OZET_ENCOK:
+            raise ValueError(f"eklenti kuralı metni {len(metin)} karakter (> {OZET_ENCOK}); --ozet ile kısa özet ver.")
+        return metin
+    if len(o) > OZET_ENCOK:
+        raise ValueError(f"özet {len(o)} karakter; en çok {OZET_ENCOK}.")
+    eksik = sorted(t for t in set(re.findall(r"ORKESTRA_[A-Z_]+", metin)) if t not in o)
+    if eksik:
+        raise ValueError("özet metindeki belirteçleri korumalı: " + ", ".join(eksik))
+    return o
+
+
 HOOK_SATIR_ONEK = "Hook ile yüklenen kurallar (bu dosyada yok, ilgili anda hook söyler): "
 
 
@@ -1266,19 +1286,23 @@ def kural_oner(sd: str, metin: str, neden: str, kaynak: str, kontrol: str | None
 
 
 def kural_ekle(sd: str, metin: str, neden: str, kaynak: str = "panel", kontrol: str | None = None,
-               katman: str = "proje") -> dict:
-    """Doğrudan etkin kural (kullanıcı yazar). `katman`: 'proje' (varsayılan) ya da 'plugin'."""
+               katman: str = "proje", ozet: str | None = None) -> dict:
+    """Doğrudan etkin kural (kullanıcı yazar). `katman`: 'proje' (varsayılan) ya da 'plugin'. Eklenti kuralı
+    her oturumda özetle yüklenir: `ozet` verilmezse kısa metin özet olur, uzun metin reddedilir."""
     katman = _katman_adi(katman)
     if kontrol:
         _kontrol_dogrula(kontrol)
     if katman == "plugin":
         _terfi_kapisi(sd, metin, neden)
+        ozet = L.maskele(_ozet_belirle(L.maskele(_tek_satir(metin)), ozet))
 
     def is_(liste_):
         r = _kural_yeni(liste_, metin, neden, "etkin", kaynak, katman,
                         _kurallar_oku(sd) if katman == "plugin" else _eklenti_oku())
         if kontrol:
             r["kontrol"] = kontrol
+        if katman == "plugin":
+            r["ozet"] = ozet
         return r
     return _kural_islemi(sd, is_, katman)
 
@@ -1306,7 +1330,7 @@ def kural_bagla(sd: str, id: str, kontrol: str | None = None, kaldir: bool = Fal
     return _kural_id_islemi(sd, id, is_)
 
 
-def kural_duzenle(sd: str, id: str, metin: str, neden: str | None = None) -> dict:
+def kural_duzenle(sd: str, id: str, metin: str, neden: str | None = None, ozet: str | None = None) -> dict:
     def is_(liste_):
         r = _kural_bul(liste_, id)
         if r["durum"] not in ("oneri", "etkin"):
@@ -1316,10 +1340,13 @@ def kural_duzenle(sd: str, id: str, metin: str, neden: str | None = None) -> dic
             raise ValueError("kural metni boş olamaz.")
         yeni_neden = L.maskele(_tek_satir(neden)) if neden is not None else None
         # Eklenti katmanı her projede geçerlidir: metin ya da neden değişiyorsa terfi kapısından geçer (yazmadan önce).
-        if (r.get("katman") == "plugin" or _kural_katmani(sd, id) == "plugin") and (
-                yeni != r.get("metin") or (yeni_neden is not None and yeni_neden != r.get("neden"))):
+        eklenti = r.get("katman") == "plugin" or _kural_katmani(sd, id) == "plugin"
+        if eklenti and (yeni != r.get("metin") or (yeni_neden is not None and yeni_neden != r.get("neden"))):
             # ham metin denetlenir (maskeleme e-posta gibi kalıpları kapı görmeden siler; kural_ekle de ham metni denetler)
             _terfi_kapisi(sd, metin, neden if neden is not None else (r.get("neden") or ""))
+        # metin değişince eski özet bayatlar: özet yeniden belirlenir (hook ile yüklenen kural md'ye girmez)
+        if eklenti and r.get("yukle") != "hook" and (yeni != r.get("metin") or ozet):
+            r["ozet"] = L.maskele(_ozet_belirle(yeni, ozet))
         r.setdefault("gecmis", []).append({"zaman": L.simdi(), "olay": "duzenlendi", "metin": r["metin"]})
         r["metin"] = yeni
         if yeni_neden is not None:
@@ -1346,7 +1373,7 @@ def kural_kaldir(sd: str, id: str, not_: str) -> dict:
     return _kural_id_islemi(sd, id, is_)
 
 
-def kural_tasi(sd: str, id: str, katman: str, kimligi_koru: bool = False) -> dict:
+def kural_tasi(sd: str, id: str, katman: str, kimligi_koru: bool = False, ozet: str | None = None) -> dict:
     """Etkin bir kuralı öbür katmana taşır. Kimlik varsayılan olarak hedef katmanın sıradaki kimliği olur (eski kimlik
     `eski_id` alanında kalır); `kimligi_koru` mevcut kimliği korur (belge ve kodun atıf yaptığı kimlikler için) ve hedefte
     o kimlik varsa reddedilir."""
@@ -1363,12 +1390,16 @@ def kural_tasi(sd: str, id: str, katman: str, kimligi_koru: bool = False) -> dic
             raise ValueError(f"{id} taşınamaz (durum: {r['durum']}); yalnız etkin kural taşınır.")
         if hedef_k == "plugin":
             _terfi_kapisi(sd, r.get("metin", ""), r.get("neden", ""))
+            if r.get("yukle") != "hook":
+                ozet = L.maskele(_ozet_belirle(r.get("metin", ""), ozet or r.get("ozet")))  # yazmadan önce: uzun ve özetsizse reddeder
         yeni_id = id if kimligi_koru else _kural_sonraki_id(hedef, hedef_k, kaynak)
         if any(x.get("id") == yeni_id for x in hedef):
             raise ValueError(f"{yeni_id} hedef katmanda zaten var; kimlik korunamaz.")
         simdi = L.simdi()
         kaynak.remove(r)
         r["katman"] = hedef_k
+        if hedef_k == "plugin" and r.get("yukle") != "hook":
+            r["ozet"] = ozet
         if yeni_id != id:
             r["eski_id"] = id
             r["id"] = yeni_id

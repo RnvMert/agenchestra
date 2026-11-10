@@ -167,6 +167,57 @@ class Mod(unittest.TestCase):
         self.assertIsNone(karar("Bash", "git status", sd=self.sd))
         self.assertEqual(karar("Bash", "git push", sd=self.sd), "ask")  # kapı ezmede de durur
 
+    def _ezme_yaz(self, veri):
+        with open(os.path.join(self.sd, "izin_politikasi.json"), "w", encoding="utf-8") as f:
+            json.dump(veri, f)
+
+    def test_list_oneksiz_ezme_okuma_araci_onaysiz(self):
+        # I-433: ezmedeki GitHub girişi `list_` önekini içermese de varsayılan okuma deseni korunur; okuma aracı onaysız
+        os.environ["ORKESTRA_IZIN"] = "kapi"  # genis'te kapı dışı her araç allow olurdu; kapi modunda okuma `None` döner
+        self._ezme_yaz({"mcp": [{"ad": "GitHub", "arac": "^mcp__github__",
+                                 "okuma": "^mcp__github__(?:get_|search_)"}]})
+        for a in ("list_commits", "list_issues", "get_file_contents"):
+            self.assertIsNone(karar(f"mcp__github__{a}", sd=self.sd), a)  # kapıya düşmez (ask değil)
+        self.assertEqual(karar("mcp__github__push_files", sd=self.sd), "ask")
+        os.environ["ORKESTRA_IZIN"] = "genis"
+        self.assertEqual(karar("mcp__github__list_commits", sd=self.sd), "allow")
+
+    def test_tek_mcp_ezmesi_varsayilan_girisleri_korur(self):
+        os.environ["ORKESTRA_IZIN"] = "kapi"
+        self._ezme_yaz({"mcp": [{"ad": "Proje sunucusu", "arac": "^mcp__proje__", "okuma": "^mcp__proje__get_"}]})
+        cfg = IP.ayar_yukle(self.sd)
+        adlar = [m["ad"] for m in cfg["mcp"]]
+        varsayilan = [m["ad"] for m in IP.ayar_yukle(None)["mcp"]]
+        self.assertEqual(adlar, varsayilan + ["Proje sunucusu"])  # varsayılan + ezme, sırası korunur
+        self.assertEqual(karar("mcp__github__create_pull_request", sd=self.sd), "ask")  # GitHub korunur
+        self.assertEqual(karar("mcp__postgres__execute_sql", sd=self.sd), "ask")  # veritabanı korunur
+        self.assertEqual(karar("mcp__postgres-yazma__execute_sql", sd=self.sd), "ask")
+        self.assertEqual(karar("mcp__proje__sil", sd=self.sd), "ask")  # ezme girişi de etkin
+        self.assertIsNone(karar("mcp__proje__get_x", sd=self.sd))
+        self.assertTrue(cfg["kabuk_kapi"])  # ezmede olmayan alanlar aynen kalır
+
+    def test_ezme_birlesme_tekrarsiz_ve_degistir(self):
+        varsayilan = IP.ayar_yukle(None)
+        self._ezme_yaz({"auto_acilan": ["mcp", "yeni"], "mod": "kapi"})
+        cfg = IP.ayar_yukle(self.sd)
+        self.assertEqual(cfg["auto_acilan"], varsayilan["auto_acilan"] + ["yeni"])  # tekrar yok
+        self.assertEqual(cfg["mod"], "kapi")  # tekil alan ezilir
+        self._ezme_yaz({"degistir": ["mcp"], "mcp": [{"ad": "Yalnız", "arac": "^mcp__x__", "okuma": "(?!)"}]})
+        cfg = IP.ayar_yukle(self.sd)
+        self.assertEqual([m["ad"] for m in cfg["mcp"]], ["Yalnız"])  # açık değiştirme isteği
+        self.assertNotIn("degistir", cfg)
+        self.assertEqual(IP._birlestir({"a": {"b": [1]}, "c": 1}, {"a": {"b": [1, 2], "d": 3}}),
+                         {"a": {"b": [1, 2], "d": 3}, "c": 1})  # sözlük özyinelemeli
+
+    def test_goster_ezme_kaynagini_yazar(self):
+        self._ezme_yaz({"mcp": [{"ad": "Proje sunucusu", "arac": "^mcp__proje__", "okuma": "(?!)"}]})
+        env = dict(os.environ, PYTHONUTF8="1")
+        r = ic_kos.kos([CLI, "izin", "goster", "--sd", self.sd], cwd=KOK, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(os.path.join(self.sd, "izin_politikasi.json"), r.stdout)
+        self.assertIn("kapı: MCP GitHub", r.stdout)
+        self.assertIn("kapı: MCP Proje sunucusu", r.stdout)
+
     def test_bozuk_ayar_yedege_duser(self):
         cfg = IP.ayar_yukle(self.sd)
         self.assertEqual(cfg["mod"], "genis")  # eklentinin kendi dosyası geçerli

@@ -5,7 +5,9 @@
 - eski oturum kayıtları `oturumlar_arsiv/<YYYYAA>/` altına taşınır (bu oturumun kaydına dokunulmaz),
 - ortak defterin aylık özeti `ortak_defter_ozet.json` olarak yazılır (defterin kendisi değişmez),
 - kartsız, todo'suz, içeriği boş planlı ve eşikten eski açık işler listelenir; `--kapat` ile (yalnız `--uygula`yla)
-  `--ozetsiz "otomatik açılış, iş yapılmadı"` gerekçesiyle kapatılır.
+  `--ozetsiz "otomatik açılış, iş yapılmadı"` gerekçesiyle kapatılır; `--sohbet` yalnız sohbet mesajından açılanları alır
+  (I-433: is.json `kaynak: sohbet`, eski kayıtta atif.jsonl ilk bağlanması `hook-otomatik-baglama`),
+- bağsız oturum retleri son `--olcum-gun` (14) günde gunluk.jsonl'dan sayılır (I-433 K4; yalnız ölçüm).
 """
 from __future__ import annotations
 
@@ -104,7 +106,7 @@ def bos_isler(sd: str, saat: float, simdi: datetime.datetime | None = None) -> l
     import is_kaydi
     simdi = simdi or datetime.datetime.now().astimezone()
     kart_isleri = {str(k.get("is")) for k in L.kartlar(sd) if k.get("is")}
-    out = []
+    out, ilk_atif = [], None
     for g in is_kaydi.is_liste(sd, "acik"):
         klasor = g.get("klasor") or ""
         if g["id"] in kart_isleri or _plan_dolu(os.path.join(klasor, "plan.md")):
@@ -119,8 +121,58 @@ def bos_isler(sd: str, saat: float, simdi: datetime.datetime | None = None) -> l
             continue
         yas = (simdi - olus).total_seconds() / 3600
         if yas >= saat:
-            out.append({"id": g["id"], "baslik": str(g.get("baslik") or ""), "yas_saat": round(yas, 1)})
+            if ilk_atif is None:
+                ilk_atif = _ilk_atif_kaynaklari(sd)
+            out.append({"id": g["id"], "baslik": str(g.get("baslik") or ""), "yas_saat": round(yas, 1),
+                        "kaynak": _is_kaynagi(g, ilk_atif)})
     return out
+
+
+def _ilk_atif_kaynaklari(sd: str) -> dict:
+    """atif.jsonl'de her işin ilk bağlanma kaynağı (`hook-otomatik-baglama` | `cli-is-baglama`); eski kayıtlar için."""
+    ilk = {}
+    for r in sorted(L.jsonl_oku(os.path.join(sd, "atif.jsonl")), key=lambda r: str(r.get("zaman") or "")):
+        if r.get("is") and r.get("kaynak"):
+            ilk.setdefault(str(r["is"]), str(r["kaynak"]))
+    return ilk
+
+
+def _is_kaynagi(g: dict, ilk_atif: dict) -> str:
+    """I-433: iş sohbet mesajından mı açıldı: is.json `kaynak` alanı (hook yazar); alan yoksa (eski kayıt) atif.jsonl'deki
+    ilk bağlanma `hook-otomatik-baglama` ise 'sohbet'. Bilinmiyorsa 'bilinmiyor'."""
+    try:
+        with open(os.path.join(str(g.get("klasor") or ""), "is.json"), encoding="utf-8") as f:
+            kaynak = (json.load(f) or {}).get("kaynak")
+    except (OSError, ValueError, AttributeError):
+        kaynak = None
+    if kaynak:
+        return str(kaynak)
+    return "sohbet" if ilk_atif.get(str(g.get("id"))) == "hook-otomatik-baglama" else "bilinmiyor"
+
+
+BAGSIZ_KAPILARI = ("bagsiz_otomatik_bagla", "bagsiz_kabuk")
+
+
+def bagsiz_olcum(sd: str, gun: float = 14, simdi: datetime.datetime | None = None) -> dict:
+    """I-433 K4: son `gun` günde (yerel takvim günü, L.gun_baslangici) bağsız oturum kapılarının gunluk.jsonl kayıtları.
+    `bagsiz_otomatik_bagla` kapi_golge = tek net eşleşmesi olan ret (ihlal modunda otomatik bağlanırdı); `bagsiz_kabuk`
+    kapi_ret/kapi_golge = kabuk yazım retleri. Salt okuma; karar vermez."""
+    bas = L.gun_baslangici(gun, simdi)
+    say = collections.Counter()
+    for r in L.jsonl_oku(os.path.join(sd, "gunluk.jsonl")):
+        if r.get("kapi") not in BAGSIZ_KAPILARI or r.get("tur") not in ("kapi_golge", "kapi_ret"):
+            continue
+        try:
+            z = datetime.datetime.fromisoformat(str(r.get("zaman")))
+            z = z if z.tzinfo else z.astimezone()
+        except ValueError:
+            continue
+        if z >= bas:
+            say[f"{r['kapi']}:{r['tur']}"] += 1
+    return {"gun": gun, "baslangic": bas.isoformat(timespec="seconds"),
+            "otomatik_bagla_golge": say["bagsiz_otomatik_bagla:kapi_golge"],
+            "otomatik_bagla_ret": say["bagsiz_otomatik_bagla:kapi_ret"],
+            "kabuk_ret": say["bagsiz_kabuk:kapi_ret"], "kabuk_golge": say["bagsiz_kabuk:kapi_golge"]}
 
 
 def _goreli(sd: str, yol: str) -> str:
@@ -164,7 +216,8 @@ def olu_yol_ve_terk(sd: str, a, rapor: dict, uygula: bool) -> None:
     is_esleme.json, varsayılan 24) ekler. --kapat --uygula terk işleri mevcut kapatma yoluyla kapatır; ölü yola dokunmaz."""
     import is_olu_yol as O
     rapor["olu_yol"] = O.olu_yollar(sd)
-    rapor["terk_isler"] = O.terk_isler(sd, bos_isler)
+    rapor["terk_isler"] = [g for g in O.terk_isler(sd, bos_isler)
+                           if not getattr(a, "sohbet", False) or g.get("kaynak") == "sohbet"]  # I-433: --sohbet terki de süzer
     if uygula and a.kapat:
         from komutlar import isler
         for g in rapor["terk_isler"]:
@@ -216,9 +269,12 @@ def cmd_bakim(a):
     oturumlar = eski_oturumlar(sd, a.oturum_gun)
     ozet = defter_ozeti(sd)
     bos = bos_isler(sd, a.bos_saat)
+    if getattr(a, "sohbet", False):  # I-433: yalnız sohbet mesajından açılmış boş işler
+        bos = [g for g in bos if g.get("kaynak") == "sohbet"]
     rapor = {"mod": "uygula" if uygula else "kuru", "lock": [_goreli(sd, x) for x in locklar],
              "oturum": [_goreli(sd, x) for x in oturumlar], "defter": ozet, "bos_isler": bos,
-             "silinen_lock": 0, "arsivlenen_oturum": 0, "kapatilan_is": []}
+             "silinen_lock": 0, "arsivlenen_oturum": 0, "kapatilan_is": [],
+             "bagsiz_olcum": bagsiz_olcum(sd, getattr(a, "olcum_gun", 14))}
     if uygula:
         for yol in oturumlar:
             ay = datetime.datetime.fromtimestamp(os.path.getmtime(yol)).strftime("%Y%m")
@@ -253,9 +309,13 @@ def cmd_bakim(a):
     print(f"oturum kaydı: {len(oturumlar)} eski ({a.oturum_gun:g} gün)" + (f"; arşivlenen {rapor['arsivlenen_oturum']}" if uygula else ""))
     aylar = ", ".join(f"{k}: {v}" for k, v in ozet["aylik"].items()) or "-"
     print(f"defter: {ozet['satir']} satır, {ozet['bayt']} bayt; aylık {aylar}")
-    print(f"boş açık iş: {len(bos)} (kartsız, todo'suz, içeriği boş planlı, ≥{a.bos_saat:g} saat)")
+    sohbet = "sohbet kaynaklı, " if getattr(a, "sohbet", False) else ""
+    print(f"boş açık iş: {len(bos)} ({sohbet}kartsız, todo'suz, içeriği boş planlı, ≥{a.bos_saat:g} saat)")
     for g in bos:
-        print(f"  {g['id']} {g['baslik'][:60]} ({g['yas_saat']} saat)")
+        print(f"  {g['id']} {g['baslik'][:60]} ({g['yas_saat']} saat; kaynak {g.get('kaynak', '-')})")
+    b = rapor["bagsiz_olcum"]
+    print(f"bağsız oturum retleri (son {b['gun']:g} gün, gunluk.jsonl): otomatik bağlama gölge {b['otomatik_bagla_golge']} "
+          f"(tek net eşleşmeli ret; ihlal modunda bağlanırdı), kabuk ret {b['kabuk_ret']}, kabuk gölge {b['kabuk_golge']}")
     _u = hook_kural_uyari(sd)
     if _u:
         print(_u)
@@ -277,5 +337,7 @@ def kaydet(alt):
     b.add_argument("--oturum-gun", type=float, default=30, metavar="GUN", help="bu günden eski oturum kayıtları (varsayılan 30)")
     b.add_argument("--bos-saat", type=float, default=24, metavar="SAAT", help="boş sayılması için en az iş yaşı (varsayılan 24)")
     b.add_argument("--kapat", action="store_true", help=f"boş açık işleri --ozetsiz \"{OZETSIZ_NEDEN}\" ile kapat (--uygula ile)")
+    b.add_argument("--sohbet", action="store_true", help="boş işlerden yalnız sohbet mesajından açılanlar (--kapat ile yalnız onlar kapanır)")
+    b.add_argument("--olcum-gun", type=float, default=14, metavar="GUN", help="bağsız oturum ret ölçümü penceresi (varsayılan 14)")
     b.add_argument("--json", action="store_true")
     b.set_defaults(f=cmd_bakim)

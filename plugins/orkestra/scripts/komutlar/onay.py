@@ -269,12 +269,12 @@ def cmd_kural(a):
         k = onay._anahtarli(sd, f"kural:{r['id']}")
         print(f"{r['id']} önerildi (katman: proje)" + (f" (onay {k['id']})" if k else ""))
     elif i == "ekle":
-        r = _onay_calistir(lambda m: m.kural_ekle(sd, a.metin, a.neden, kaynak="cli", kontrol=a.kontrol, katman=a.katman))
+        r = _onay_calistir(lambda m: m.kural_ekle(sd, a.metin, a.neden, kaynak="cli", kontrol=a.kontrol, katman=a.katman, ozet=a.ozet))
         print(f"{r['id']} etkin (katman: {r['katman']})")
         if r["katman"] == "proje":
             print("Not: kural yalnız bu projede geçerli. Her projede geçmesi gerekiyorsa: orkestra kural tasi " + r["id"] + " --katman plugin")
     elif i == "tasi":
-        r = _onay_calistir(lambda m: m.kural_tasi(sd, a.id, a.katman, kimligi_koru=a.kimligi_koru))
+        r = _onay_calistir(lambda m: m.kural_tasi(sd, a.id, a.katman, kimligi_koru=a.kimligi_koru, ozet=a.ozet))
         print(f"{r['id']} {r['katman']} katmanına taşındı" + (f" (eski kimlik {r['eski_id']})" if r.get("eski_id") else ""))
     elif i == "kapat":
         r = _onay_calistir(lambda m: m.kural_kapat(sd, a.id, a.not_))
@@ -285,7 +285,7 @@ def cmd_kural(a):
     elif i == "esitle":
         print("kural dosyası yenilendi" if _onay_calistir(lambda m: m.kural_dosyasi_esitle(sd)) else "kural dosyası güncel")
     elif i == "duzenle":
-        r = _onay_calistir(lambda m: m.kural_duzenle(sd, a.id, a.metin, a.neden))
+        r = _onay_calistir(lambda m: m.kural_duzenle(sd, a.id, a.metin, a.neden, ozet=a.ozet))
         print(f"{r['id']} güncellendi")
     elif i == "kaldir":
         r = _onay_calistir(lambda m: m.kural_kaldir(sd, a.id, a.not_))
@@ -376,10 +376,12 @@ def kaydet(alt):
         if ad == "ekle":
             x.add_argument("--katman", choices=["proje", "plugin", "eklenti"], default="proje",
                            help="proje: yalnız bu projede geçerli (varsayılan); plugin: orkestra eklentisinde saklanır, her projede geçerli")
+            x.add_argument("--ozet", default=None, help="eklenti kuralının her oturumda yüklenen kısa özeti (metindeki ORKESTRA_* belirteçlerini korur)")
     x = ku.add_parser("tasi", help="etkin kuralı öbür katmana taşır (proje <-> plugin)")
     x.add_argument("id")
     x.add_argument("--katman", required=True, choices=["proje", "plugin", "eklenti"], help="hedef katman")
     x.add_argument("--kimligi-koru", action="store_true", help="kimliği değiştirme (belge/kod atıf yapıyorsa)")
+    x.add_argument("--ozet", default=None, help="eklenti kuralının her oturumda yüklenen kısa özeti (metindeki ORKESTRA_* belirteçlerini korur)")
     x = ku.add_parser("kapat", help="eklenti kuralını yalnız bu projede kapat")
     x.add_argument("id")
     x.add_argument("--not", dest="not_", default="")
@@ -395,6 +397,7 @@ def kaydet(alt):
     x.add_argument("id")
     x.add_argument("--metin", required=True)
     x.add_argument("--neden")
+    x.add_argument("--ozet", default=None, help="eklenti kuralının her oturumda yüklenen kısa özeti (metindeki ORKESTRA_* belirteçlerini korur)")
     x = ku.add_parser("kaldir")
     x.add_argument("id")
     x.add_argument("--not", dest="not_", required=True)

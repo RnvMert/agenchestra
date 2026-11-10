@@ -98,7 +98,7 @@ class TestKuralIhlal(_Proje):  # K1, K4, K5
             self.kos(hook._kimlik_kapisi_yanit, "Cosmos erişimi bekleniyor.")
         k = self.kayit("kimlik_once_bak")
         # yardımcı bozulsa da eski şema (`v`: jsonl_ekle'nin şema sürümü)
-        self.assertEqual(set(k) - {"v"}, {"zaman", "oturum", "tur", "kural", "mod", "is"})
+        self.assertEqual(set(k) - {"v", "kok"}, {"zaman", "oturum", "tur", "kural", "mod", "is"})  # kok: I-433
 
 
 class TestKapiRet(_Proje):  # K2, K3

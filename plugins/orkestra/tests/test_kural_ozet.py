@@ -76,5 +76,48 @@ class KuralOzet(unittest.TestCase):
         self.assertLessEqual(len(md.encode("utf-8")), MD_ENCOK_BAYT)
 
 
+class YazimdaOzet(unittest.TestCase):
+    """Özet yazım anında belirlenir (I-433: P-061 CLI ile özetsiz eklendi, md'ye tam metin girdi)."""
+
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.sd = os.path.join(self.t.name, "proje", ".claude", "orkestra")
+        os.makedirs(self.sd)
+        self.env = mock.patch.dict(os.environ, {"ORKESTRA_EKLENTI_KURALLARI": os.path.join(self.t.name, "depo.json")})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.t.cleanup()
+
+    def test_uzun_ozetsiz_eklenti_kurali_reddedilir_ozetle_kabul(self):
+        uzun = "kural " * 100 + "ORKESTRA_DENEME kapatır."
+        with self.assertRaises(ValueError):
+            onay.kural_ekle(self.sd, uzun, "", katman="plugin")
+        with self.assertRaises(ValueError):  # belirteç kaybolursa
+            onay.kural_ekle(self.sd, uzun, "", katman="plugin", ozet="kısa özet")
+        r = onay.kural_ekle(self.sd, uzun, "", katman="plugin", ozet="Kısa özet. ORKESTRA_DENEME kapatır.")
+        self.assertEqual(ozet_ihlalleri(onay._eklenti_oku()), [])
+        self.assertEqual(r["ozet"], "Kısa özet. ORKESTRA_DENEME kapatır.")
+
+    def test_kisa_kural_ozeti_metindir_duzenleme_ozeti_yeniler(self):
+        r = onay.kural_ekle(self.sd, "Kısa kural", "", katman="plugin")
+        self.assertEqual(r["ozet"], "Kısa kural")
+        onay.kural_duzenle(self.sd, r["id"], "Yeni kısa kural")
+        self.assertEqual(ozet_ihlalleri(onay._eklenti_oku()), [])
+        self.assertEqual(onay._eklenti_oku()[0]["ozet"], "Yeni kısa kural")
+        with self.assertRaises(ValueError):
+            onay.kural_duzenle(self.sd, r["id"], "uzun " * 100)
+        self.assertEqual(onay._eklenti_oku()[0]["metin"], "Yeni kısa kural")
+
+    def test_projeden_tasinan_uzun_kural_ozet_ister(self):
+        r = onay.kural_ekle(self.sd, "uzun " * 100, "")
+        self.assertNotIn("ozet", r)
+        with self.assertRaises(ValueError):
+            onay.kural_tasi(self.sd, r["id"], "plugin")
+        t = onay.kural_tasi(self.sd, r["id"], "plugin", ozet="Kısa özet")
+        self.assertEqual((t["katman"], t["ozet"]), ("plugin", "Kısa özet"))
+
+
 if __name__ == "__main__":
     unittest.main()

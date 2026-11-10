@@ -180,6 +180,85 @@ class AgacTemizleTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.bitmis))
         self.assertNotEqual(git(self.depo, "branch", "--list", "bitmis"), "")
 
+    # ---- I-433: iş belgesi koruması
+    def belge(self, *parca, icerik="x"):
+        yol = os.path.join(self.bitmis, *parca)
+        os.makedirs(os.path.dirname(yol), exist_ok=True)
+        with open(yol, "w", encoding="utf-8") as f:
+            f.write(icerik)
+        return yol
+
+    def belgeler(self, s):
+        return sorted(os.path.normcase(os.path.normpath(b)) for x in s["atlanan"] for b in x.get("belgeler", []))
+
+    def norm(self, *yollar):
+        return sorted(os.path.normcase(os.path.normpath(y)) for y in yollar)
+
+    def test_kayitli_is_klasorunde_commitsiz_belge_kalkmaz(self):
+        sd = os.path.join(self.depo, ".claude", "orkestra")
+        os.makedirs(sd)
+        klasor = os.path.join(self.bitmis, "Is", "101-is")
+        with open(os.path.join(sd, "isler.json"), "w", encoding="utf-8") as f:   # kapanmış iş: acik-is koruması devreye girmez
+            f.write('{"isler": {"I-1": {"durum": "kapandi", "klasor": %s}}}' % __import__("json").dumps(klasor))
+        plan = self.belge("Is", "101-is", "plan.md")
+        mevcut = self.belge("Is", "101-is", "mevcut_durum_20261109.md")
+        self.belge("Is", "101-is", "notlar.txt")                               # belge değil: listede yok
+        s = self.temizle()
+        self.assertEqual(self.neden(s, self.bitmis), ["is-belgesi"])
+        self.assertEqual(self.belgeler(s), self.norm(mevcut, plan))
+        self.assertEqual(s["kaldirilan"], [])
+        self.assertTrue(os.path.isfile(plan))
+
+    def test_birlesmemis_dalda_commitli_belge_kalkmaz_ve_listelenir(self):
+        isj = self.belge("Is", "102-is", "is.json", icerik="{}")
+        todo = self.belge("Is", "102-is", "todo.md")
+        git(self.bitmis, "add", ".")
+        git(self.bitmis, "commit", "-q", "-m", "belgeler")                    # isler.json kaydı yok; is.json ile bulunur
+        s = self.temizle()
+        self.assertEqual(self.neden(s, self.bitmis), ["is-belgesi"])
+        self.assertEqual(self.belgeler(s), self.norm(isj, todo))
+        self.assertTrue(os.path.isdir(self.bitmis))
+
+    def test_ignore_edilmis_belge_kalkmaz(self):
+        self.belge(".gitignore", icerik="gizli/\n")
+        git(self.bitmis, "add", ".")
+        git(self.bitmis, "commit", "-q", "-m", "ignore")
+        git(self.depo, "merge", "-q", "bitmis")                               # dal birleşmiş, worktree git'e göre temiz
+        sozlesme = self.belge("gizli", "103-is", "sozlesme_v1.md")
+        self.belge("gizli", "103-is", "is.json", icerik="{}")
+        s = self.temizle()
+        self.assertEqual(self.neden(s, self.bitmis), ["is-belgesi"])
+        self.assertIn(os.path.normcase(os.path.normpath(sozlesme)), self.belgeler(s))
+        self.assertTrue(os.path.isdir(self.bitmis))
+
+    def test_belgeleri_mainde_olan_kalkar(self):
+        self.belge("Is", "104-is", "is.json", icerik="{}")
+        self.belge("Is", "104-is", "plan.md")
+        git(self.bitmis, "add", ".")
+        git(self.bitmis, "commit", "-q", "-m", "belgeler")
+        git(self.depo, "merge", "-q", "bitmis")
+        s = self.temizle()
+        self.assertEqual(s["atlanan"], [])
+        self.assertEqual(len(s["kaldirilan"]), 1, s)
+        self.assertFalse(os.path.isdir(self.bitmis))
+        self.assertTrue(os.path.isfile(os.path.join(self.depo, "Is", "104-is", "plan.md")))
+
+    def test_belge_atlamasi_gunluge_yazilir(self):
+        sd = os.path.join(self.k, "durum")
+        os.makedirs(sd)
+        plan = self.belge("Is", "105-is", "plan.md")
+        self.belge("Is", "105-is", "is.json", icerik="{}")
+        with unittest.mock.patch.object(dal_temizle.L, "durum_dizini", lambda *a: sd), \
+                unittest.mock.patch.object(dal_temizle.kapi_mod, "mod", lambda *a: "ihlal"), \
+                unittest.mock.patch.object(dal_temizle.time, "time", lambda: self.gelecek):
+            dal_temizle._agaclari_calistir(self.oturum, "oturum", "test")
+        with open(os.path.join(sd, "gunluk.jsonl"), encoding="utf-8") as f:
+            kayit = __import__("json").loads(f.read().strip().splitlines()[-1])
+        self.assertEqual(kayit["tur"], "worktree_temizle")
+        self.assertEqual(kayit["atlanan"][0]["neden"], "is-belgesi")
+        self.assertIn(os.path.normcase(os.path.normpath(plan)), [os.path.normcase(os.path.normpath(b)) for b in kayit["atlanan"][0]["belgeler"]])
+        self.assertTrue(os.path.isdir(self.bitmis))
+
     def test_calistir_guncel_worktree_dokunmaz(self):
         sd = os.path.join(self.depo, ".claude", "orkestra")
         os.makedirs(sd)

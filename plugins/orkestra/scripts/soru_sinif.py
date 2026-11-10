@@ -112,9 +112,19 @@ def yol_metni(metin, sd=None) -> str:
     return m
 
 
+def yapistirma_mi(metin, ayar: dict) -> bool:
+    """I-433: mesaj komut ya da çıktı yapıştırması mı (`cd ...` ile başlar, kabuk istemi, traceback); kalıplar ayardan
+    (`yapistirma_kaliplari`), yalnız ilk satırda aranır. Böyle mesaj iş açmaz."""
+    ilk = ((metin or "").strip().splitlines() or [""])[0]
+    return bool(ilk) and _eslesir(ayar.get("yapistirma_kaliplari"), ilk)
+
+
 def tur(metin, sd=None) -> str:
-    """Hız için model yok: 'soru' (bilgi sorusu), 'devam' (kısa/atıflı mesaj) ya da 'is'. Kararsızsa 'devam'."""
+    """Hız için model yok: 'soru' (bilgi sorusu), 'yapistirma' (komut/çıktı yapıştırması; I-433), 'devam' (kısa/atıflı
+    mesaj) ya da 'is'. Kararsızsa 'devam'."""
     ayar = ayar_oku(sd)
+    if yapistirma_mi(metin, ayar):
+        return "yapistirma"
     m = _normallestir((metin or "").strip())
     if _is_fiil(ayar, m):  # I-138 P1: iş fiili soru kalıbından önce ("neden" geçse de iştir)
         return "is"
@@ -135,7 +145,7 @@ def bagli_tur(metin, sd=None) -> str:
     m = _normallestir((metin or "").strip())
     if not m:
         return "devam"
-    if _onay_mesaji(metin):  # I-138 P16: onay sözcüğüyle başlayan mesaj (P15 ölçütü) açıkça devamdır
+    if _onay_mesaji(metin) or yapistirma_mi(metin, ayar):  # I-138 P16; I-433: yapıştırılan komut/çıktı da devamdır: onay sözcüğüyle başlayan mesaj (P15 ölçütü) açıkça devamdır
         return "devam"
     zayif = set(ayar.get("devam_zayif_kaliplari") or [])
     guclu = [k for k in ayar.get("devam_kaliplari") or [] if k not in zayif]

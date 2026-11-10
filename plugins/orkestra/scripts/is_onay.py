@@ -657,6 +657,54 @@ def betik_yazimlari(komut: str) -> tuple[list, bool]:
     return sabit, bilinmeyen or bool(_DOLAYLI_YAZ.search(komut))
 
 
+def git_ortak_dizin(yol: str) -> str | None:
+    """`yol`un (yoksa var olan ilk atasının) bulunduğu git deposunun ortak `.git` dizini (normcase'li gerçek yol); süreç
+    başlatmaz: `.git` klasörü ana ağaçtır, `.git` dosyasındaki `gitdir: <ortak>/worktrees/<ad>` bağlı worktree'dir. Depo
+    dışında None (I-433)."""
+    d = os.path.abspath(yol)
+    while True:
+        g = os.path.join(d, ".git")
+        if os.path.isdir(g):
+            return os.path.normcase(os.path.realpath(g))
+        if os.path.isfile(g):
+            try:
+                with open(g, encoding="utf-8") as f:
+                    ilk = f.readline().strip()
+            except OSError:
+                return None
+            if not ilk.startswith("gitdir:"):
+                return None
+            gitdir = os.path.normpath(os.path.join(d, ilk[len("gitdir:"):].strip()))
+            if os.path.basename(os.path.dirname(gitdir)) == "worktrees":
+                gitdir = os.path.dirname(os.path.dirname(gitdir))
+            return os.path.normcase(os.path.realpath(gitdir))
+        ust = os.path.dirname(d)
+        if ust == d:
+            return None
+        d = ust
+
+
+def ayni_depo_haric(hedefler: list, proje: str, cwd: str | None) -> list:
+    """I-433: oturum proje ağacı dışındaki bir git worktree'sinde çalışıyorsa (cwd proje dışında), cwd ile aynı depoya
+    (git ortak dizini aynı) yazılan proje dışı hedefler bağsız kabuk kapısından çıkarılır; başka depo, depo dışı yol ve
+    proje içi hedef kalır. cwd proje içindeyse ya da depo dışındaysa liste aynen döner."""
+    if not cwd or not proje:
+        return list(hedefler)
+    p = os.path.normcase(os.path.abspath(proje)).rstrip(os.sep)
+    c = os.path.normcase(os.path.abspath(cwd))
+    if c == p or c.startswith(p + os.sep):
+        return list(hedefler)
+    ortak = git_ortak_dizin(cwd)
+    if not ortak:
+        return list(hedefler)
+    kalan = []
+    for h in hedefler:
+        n = os.path.normcase(os.path.abspath(h))
+        if (n == p or n.startswith(p + os.sep)) or git_ortak_dizin(h) != ortak:
+            kalan.append(h)
+    return kalan
+
+
 def kabuk_kalici_yazimlar(komut: str, cwd: str | None = None) -> tuple[list, bool]:
     """Kabuk komutunun geçici dizin dışına yazdığı yollar ve hedefi çözülemeyen yazım var mı (I-318)."""
     kalici, bilinmeyen = [], False

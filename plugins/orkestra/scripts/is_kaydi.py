@@ -432,8 +432,30 @@ def _alt_klasor_onerisi(klasor: str) -> str:
     return os.path.join(ust if re.match(r"\d{3}-", ad) else os.path.abspath(klasor), "NNN-YYYYMMDD-<ad>")
 
 
+_JIRA_ANAHTAR = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
+
+
+def jira_kartlari(kart) -> list[str]:
+    """I-433: `--kart` girdisinden (str ya da liste; virgülle ayrılmış olabilir) tekil, büyük harfli Jira anahtarları.
+    Biçim 'PROJE-123' değilse ValueError."""
+    if not kart:
+        return []
+    ham = [kart] if isinstance(kart, str) else list(kart)
+    out: list[str] = []
+    for parca in ham:
+        for k in str(parca).split(","):
+            k = k.strip().upper()
+            if not k:
+                continue
+            if not _JIRA_ANAHTAR.match(k):
+                raise ValueError(f"geçersiz kart anahtarı: {k} (beklenen: PROJE-123)")
+            if k not in out:
+                out.append(k)
+    return out
+
+
 def is_ac(sd: str, baslik: str, klasor: str, etiketler=None, dogrulama: bool | None = None,
-          devral: bool = False, kademe: str | None = None) -> dict:
+          devral: bool = False, kademe: str | None = None, kart=None) -> dict:
     """Yeni iş. Kapı açıkken (P-005) iş sıralıdır: ilk dosya mevcut durum iskeletidir, plan.md ve todo.md
     önceki adım tamamlanınca açılır; kapı kapalıyken (ORKESTRA_SIRA_KAPISI=0) eski üç dosya yazılır.
     Sıralı işe ayrıca `dogrulama` bayrağı konur (plan ✅/❌ kapısı); `dogrulama=False` ya da
@@ -500,6 +522,9 @@ def is_ac(sd: str, baslik: str, klasor: str, etiketler=None, dogrulama: bool | N
         if dogrulama:
             import plan_dogrulama as PD
             kayit["dogrulama"] = PD.DOGRULAMA_ADI
+    kartlar_dis = jira_kartlari(kart)
+    if kartlar_dis:
+        kayit["kart"] = kartlar_dis  # I-433 (ORKESTRA-19): işin dış (Jira) kart anahtarları; orkestra kartları "kartlar"da
     if kademe == "kucuk":
         kayit["kademe"] = "kucuk"  # ADR-0150: küçük iş; ağır plan kapıları gölge günlüğe yazılır (kucuk_kademe)
     eski_id = None
@@ -522,7 +547,8 @@ def is_ac(sd: str, baslik: str, klasor: str, etiketler=None, dogrulama: bool | N
         if eski_id and eski_id != is_id and eski_id not in veri.get("isler", {}):
             veri.setdefault("takma", {})[eski_id] = is_id
         veri.setdefault("isler", {})[is_id] = {
-            "klasor": klasor, "baslik": baslik, "durum": "acik", "olusturma": an}
+            "klasor": klasor, "baslik": baslik, "durum": "acik", "olusturma": an,
+            **({"kart": kayit["kart"]} if kayit.get("kart") else {})}
         _yaz(yol, veri)
     return kayit
 
@@ -593,6 +619,8 @@ def klasor_ayir(sd: str, kok: str, baslik: str, tarih: str | None = None, olustu
                 dolu = any(k.startswith(m.group(1) + "-") and k != tercih
                            for k in kardesler if os.path.isdir(os.path.join(kok, k)))
                 dolu = dolu or any(k.startswith(m.group(1) + "-") and k != tercih for k in kardes_agac_klasorleri(kok))
+                # I-433: silinmiş worktree'de ya da birleşmemiş dalda açılmış işin numarası da doludur (merkez kayıt)
+                dolu = dolu or any(k.startswith(m.group(1) + "-") and k != tercih for k in kayitli_kardes_adlari(sd, kok))
                 if not dolu and tercih in kardesler:  # aynı ad: yalnız açık bir iş orada çalışıyorsa dolu
                     dolu = is_klasorle_bul(sd, os.path.join(kok, tercih)) is not None
             else:
@@ -602,7 +630,7 @@ def klasor_ayir(sd: str, kok: str, baslik: str, tarih: str | None = None, olustu
             elif not dolu:
                 return tercih
         if ad is None:
-            ad = sonraki_klasor_adi(kok, baslik, tarih)
+            ad = sonraki_klasor_adi(kok, baslik, tarih, ek_adlar=kayitli_kardes_adlari(sd, kok))
         if olustur:
             yol = os.path.join(kok, ad)
             os.makedirs(yol, exist_ok=True)
@@ -645,7 +673,40 @@ def kardes_agac_klasorleri(kok: str) -> list[str]:
         return []
 
 
-def sonraki_klasor_adi(kok: str, baslik: str, tarih: str | None = None) -> str:
+def kayitli_kardes_adlari(sd: str, kok: str) -> list[str]:
+    """I-433: isler.json'da kayıtlı iş klasörlerinden `kok` ile aynı göreli üst klasörde olanların adları. Klasör diskte
+    olmayabilir (silinmiş worktree, birleşmemiş dal): numarası yine kullanılmış sayılır. Göreli üst klasör git kökünden
+    (yoksa proje kökünden) hesaplanır; kayıtlı yolun üst klasörü aynı göreli parçayla bitiyorsa eşleşir. Hatada boş liste."""
+    try:
+        kok = os.path.abspath(kok)
+        # git süreci açma: bu çağrı klasör numarası kilidi içinde koşar, süreç açmak kilidi uzatır (16 işçide zaman aşımı)
+        taban = None
+        d = kok
+        while True:
+            if os.path.exists(os.path.join(d, ".git")):
+                taban = d
+                break
+            ust = os.path.dirname(d)
+            if ust == d:
+                break
+            d = ust
+        taban = taban or os.path.dirname(os.path.dirname(os.path.abspath(sd)))
+        rel = os.path.normcase(os.path.relpath(kok, taban))
+        n_kok = os.path.normcase(kok)
+        adlar: list[str] = []
+        for g in (_oku(_merkez(sd), _BOS).get("isler") or {}).values():
+            k = g.get("klasor") if isinstance(g, dict) else None
+            if not k:
+                continue
+            ust = os.path.normcase(os.path.dirname(os.path.abspath(k)))
+            if ust == n_kok or (not rel.startswith("..") and rel != "." and ust.endswith(os.sep + rel)):
+                adlar.append(os.path.basename(os.path.abspath(k)))
+        return adlar
+    except Exception:
+        return []
+
+
+def sonraki_klasor_adi(kok: str, baslik: str, tarih: str | None = None, ek_adlar=()) -> str:
     """kök altında sıradaki 'NNN-YYYYMMDD-<slug>' adı: NNN = en büyük ^\\d{3}- numarası + 1 (3 hane); öteki git
     çalışma ağaçlarındaki aynı klasör de sayılır (`kardes_agac_klasorleri`)."""
     import datetime
@@ -657,7 +718,7 @@ def sonraki_klasor_adi(kok: str, baslik: str, tarih: str | None = None) -> str:
                 en_buyuk = max(en_buyuk, int(m.group(1)))
     except OSError:
         pass
-    for ad in kardes_agac_klasorleri(kok):
+    for ad in list(kardes_agac_klasorleri(kok)) + list(ek_adlar or ()):  # ek_adlar: merkez kayıttaki kardeşler (I-433)
         m = _NNN.match(ad)
         if m:
             en_buyuk = max(en_buyuk, int(m.group(1)))

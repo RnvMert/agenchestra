@@ -49,6 +49,12 @@
     "\\bçöz(?:elim|ün|sün|ülsün)\\b",
     "\\byaparak\\b"
   ],
+  "yapistirma_kaliplari": [
+    "^\\s*cd\\s+\\S",
+    "^\\s*PS [A-Za-z]:\\\\[^>\\n]*>",
+    "^\\s*\\$\\s+\\S",
+    "^\\s*Traceback \\(most recent call last\\)"
+  ],
   "devam_max_karakter": 0,
   "devam_kisa_max_karakter": 24,
   "devam_zayif_kaliplari": [

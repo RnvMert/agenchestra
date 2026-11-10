@@ -357,10 +357,104 @@ def _acik_is_klasorleri(durum_klasorleri: list[str]) -> list[str]:
     return out
 
 
+def _kayitli_is_klasorleri(durum_klasorleri: list[str]) -> list[str]:
+    """isler.json'daki bütün işlerin (durumdan bağımsız) klasörleri."""
+    import json
+    out = []
+    for sd in durum_klasorleri:
+        try:
+            with open(os.path.join(sd, "isler.json"), encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        for it in (d.get("isler") or {}).values() if isinstance(d, dict) else []:
+            if isinstance(it, dict) and it.get("klasor"):
+                out.append(os.path.normpath(it["klasor"]))  # gerçek harf düzeni korunur: git yolları büyük/küçük harf duyarlı
+    return out
+
+
+IS_BELGE_SABIT = ("plan.md", "todo.md", "is.json")
+IS_BELGE_ONEK = ("mevcut_durum_", "sozlesme_")
+_TARAMA_ATLA = {".git", "node_modules", ".venv", "venv", "__pycache__"}
+TARAMA_SINIRI = "<tarama-siniri>"
+
+
+def _belge_mi(ad: str) -> bool:
+    return ad in IS_BELGE_SABIT or (ad.endswith(".md") and ad.startswith(IS_BELGE_ONEK))
+
+
+def _is_belgeleri(yol: str, kayitli: list[str], sinir: int = 50000) -> list[str]:
+    """Worktree'deki iş klasörlerinin belge dosyaları (mutlak yol).
+
+    İş klasörü: isler.json'da `klasor` alanı bu worktree altında olan klasör ya da `is.json` içeren klasör.
+    Tarama sınırı aşılırsa emin olunamadığından listeye TARAMA_SINIRI eklenir (güvenli tarafta kal)."""
+    kok = _yol(yol)
+    klasorler = {}  # normcase -> os.walk'tan gelen gerçek yol (git yolu üretmek için harf düzeni korunur)
+    for k in kayitli:
+        if (_yol(k) == kok or _yol(k).startswith(kok + os.sep)) and os.path.isdir(k):
+            klasorler.setdefault(_yol(k), k)
+    sayac = 0
+    for d, alt, dosyalar in os.walk(yol):
+        alt[:] = [a for a in alt if a not in _TARAMA_ATLA]
+        sayac += 1
+        if sayac >= sinir:
+            return [TARAMA_SINIRI]
+        if "is.json" in dosyalar or _yol(d) in klasorler:
+            klasorler[_yol(d)] = os.path.normpath(d)  # disk harf düzeni kayıttakinden önceliklidir
+    out = []
+    for k in sorted(klasorler.values()):
+        try:
+            adlar = os.listdir(k)
+        except OSError:
+            continue
+        out.extend(os.path.join(k, ad) for ad in sorted(adlar) if _belge_mi(ad) and os.path.isfile(os.path.join(k, ad)))
+    return out
+
+
+def _riskli_belgeler(cwd: str, yol: str, dal: str, kayitli: list[str]) -> list[str]:
+    """Worktree kaldırılırsa kaybolacak iş belgeleri (I-433).
+
+    Belge güvendedir: içeriği `main`'de aynen varsa ya da dalda commit edilmiş, değişmemiş ve dal `main`'e birleşmişse.
+    Commit'siz, git-ignore edilmiş ya da birleşmemiş dalda kalan belge risklidir."""
+    belgeler = _is_belgeleri(yol, kayitli)
+    if not belgeler or belgeler == [TARAMA_SINIRI]:
+        return belgeler
+    rels = [os.path.relpath(b, yol).replace(os.sep, "/") for b in belgeler]
+    # toplu: tek hash-object (filtreler yola göre uygulanır) ve iki ls-tree; belge başına süreç açılmaz
+    r = subprocess.run(["git", "-C", yol, "hash-object", "--stdin-paths"], input="\n".join(rels) + "\n", capture_output=True,
+                       text=True, encoding="utf-8", errors="replace", timeout=120, **cfg.PENCERESIZ)
+    hashler = r.stdout.split() if r.returncode == 0 else []
+    if len(hashler) != len(rels):
+        return belgeler  # okunamadı: güvenli tarafta kal
+
+    def agac(depo: str, ref: str) -> dict:
+        out = {}
+        for satir in _git(depo, "ls-tree", "-r", "-z", "--full-tree", ref).stdout.split("\0"):
+            if "\t" in satir:
+                bas, p = satir.split("\t", 1)
+                out[p] = bas.split()[-1]
+        return out
+
+    ana_agac, dal_agac = agac(cwd, ANA), agac(yol, "HEAD")
+    riskli, birlesmis = [], None
+    for b, rel, h in zip(belgeler, rels, hashler):
+        if ana_agac.get(rel) == h:
+            continue
+        if dal_agac.get(rel) == h:
+            if birlesmis is None:
+                birlesmis = birlesmis_mi(cwd, dal)
+            if birlesmis:
+                continue
+        riskli.append(b)
+    return riskli
+
+
 def agaclar_temizle(cwd: str, oturum_dali: str = "", kip: str = "golge", simdi: float | None = None) -> dict:
     """`main`'e birleşmiş, temiz, kilitsiz, açık iş kaydı olmayan ve atıl (varsayılan 24 saat) worktree'leri kaldırır.
 
     Kullanımda olmama sinyalleri: kilit yok, worktree'de açık iş yok (kayıt), son etkinlik eşikten eski (ikincil emniyet).
+    İş belgesi koruması (I-433): commit'siz, ignore edilmiş ya da main'e birleşmemiş iş belgesi (plan/todo/mevcut_durum_*/
+    sozlesme_*/is.json) içeren worktree kaldırılmaz; atlanan kaydı `neden='is-belgesi'` ve `belgeler` listesi taşır.
     İhlal kipinde önce dallar `git bundle` ile yedeklenir; yedek yoksa hiçbir şey kaldırılmaz. Kirli worktree'ye dokunulmaz.
     Dönen: {'kip','aday','atlanan','kaldirilan','bundle','hata'}."""
     s = {"kip": kip, "aday": [], "atlanan": [], "kaldirilan": [], "bundle": "", "hata": ""}
@@ -369,18 +463,22 @@ def agaclar_temizle(cwd: str, oturum_dali: str = "", kip: str = "golge", simdi: 
         esik = float(_ayar(cwd, "atil_saat", ATIL_SAAT_VARSAYILAN)) * 3600
         ana_yol, _ = _worktree_dallari(cwd)
         kendi = _yol(_git(cwd, "rev-parse", "--show-toplevel").stdout.strip() or cwd)
-        acik = _acik_is_klasorleri([d for d in (L.durum_dizini(ana_yol), L.durum_dizini(cwd)) if d])
+        durumlar = [d for d in (L.durum_dizini(ana_yol), L.durum_dizini(cwd)) if d]
+        acik = _acik_is_klasorleri(durumlar)
+        kayitli = _kayitli_is_klasorleri(durumlar)
         for ag in _agaclar(cwd):
             yol, dal = ag["yol"], ag["dal"]
             if _yol(yol) == kendi or (dal and dal == oturum_dali):
                 continue
-            neden = ""
+            neden, belgeler = "", []
             if not dal or dal == ANA:
                 neden = "dal-yok-ya-da-main"
             elif ag["kilitli"]:
                 neden = "kilitli"
             elif ag["prunable"] or not os.path.isdir(yol):
                 neden = "klasor-yok"
+            elif (belgeler := _riskli_belgeler(cwd, yol, dal, kayitli)):
+                neden = "is-belgesi"  # I-433: commit'siz ya da main'e birleşmemiş iş belgesi worktree ile kaybolurdu
             elif not birlesmis_mi(cwd, dal):
                 neden = "birlesmemis"
             elif _kirli(yol) is None or _kirli(yol):
@@ -396,7 +494,7 @@ def agaclar_temizle(cwd: str, oturum_dali: str = "", kip: str = "golge", simdi: 
                 if simdi - _son_etkinlik(yol, float(ct) if ct.isdigit() else 0.0) < esik:
                     neden = "guncel"
             if neden:
-                s["atlanan"].append({"yol": yol, "neden": neden})
+                s["atlanan"].append({"yol": yol, "neden": neden, **({"belgeler": belgeler[:50]} if belgeler else {})})
             else:
                 s["aday"].append({"yol": yol, "dal": dal})
         if kip != "ihlal" or not s["aday"]:
@@ -422,7 +520,7 @@ def _agaclari_calistir(cwd: str, oturum_dali: str, kaynak: str) -> None:
         return
     try:
         s = agaclar_temizle(cwd, oturum_dali, kapi_mod.mod(KAPI, cwd))
-        if s["aday"] or s["hata"]:
+        if s["aday"] or s["hata"] or any(a.get("belgeler") for a in s["atlanan"]):
             sd = L.durum_dizini(cwd)
             if sd:
                 L.jsonl_ekle(os.path.join(sd, "gunluk.jsonl"), {"zaman": L.simdi(), "tur": "worktree_temizle", "kaynak": kaynak, **s})

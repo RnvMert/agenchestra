@@ -9,7 +9,8 @@ Karar (PreToolUse hook'u kullanır): deny | ask | allow | None.
   ask    git push, gh ile yazma, GitHub/Jira REST'ine yazan curl, GitHub ve Jira MCP yazma araçları.
   allow  kapı dışındaki her araç (yalnız mod=genis). Kullanıcının settings deny/ask kuralları hook allow'una rağmen geçerlidir.
   None   karar yok (mod=kapi'de kapı dışı; mod=kapali).
-Mod: ayarlar/izin_politikasi.json; proje ezmesi <sd>/izin_politikasi.json (üst düzey alanlar); ORKESTRA_IZIN=0|kapi|genis modu ezer.
+Mod: ayarlar/izin_politikasi.json; proje ezmesi <sd>/izin_politikasi.json (alan türüne göre birleşir: sözlük özyinelemeli,
+liste varsayılan + ezme tekrarsız, diğerleri ezilir; ezmede "degistir": [alan] o alanı tümüyle değiştirir; I-433); ORKESTRA_IZIN=0|kapi|genis modu ezer.
 Desenler en iyi çabadır: betik içinden API çağrısı yakalanmaz. MCP'de okuma deseni dışındaki her araç kapıya düşer (güvenli varsayılan).
 Veri heredoc'u ve PowerShell here-string gövdesi komut sayılmaz; yorumlayıcıya giden gövde kod sayılır (I-224).
 ADR-0086: bağlı işin modu `auto` ise halka açık eylem kapıları (`ask`) `allow` döner; `deny` sınıfı, kimlik kapısı ve kalıcı silme
@@ -52,12 +53,52 @@ def _json_sozluk(yol: str):
         return None
 
 
+DEGISTIR_ANAHTARI = "degistir"  # ezmede: bu üst düzey alanlar birleşmez, tümüyle değiştirilir (açık istek)
+
+
+def _anahtar(v) -> str:
+    return json.dumps(v, sort_keys=True, ensure_ascii=False)
+
+
+def _birlestir(taban, ezme):
+    """Alan türüne göre birleştirme (I-433): sözlük özyinelemeli, liste taban + ezme (tekrar yok), diğerleri ezme kazanır.
+    Böylece ezmedeki tek bir `mcp` girişi varsayılan GitHub/Jira/veritabanı kapılarını düşürmez."""
+    if isinstance(taban, dict) and isinstance(ezme, dict):
+        out = dict(taban)
+        for k, v in ezme.items():
+            out[k] = _birlestir(taban[k], v) if k in taban else copy.deepcopy(v)
+        return out
+    if isinstance(taban, list) and isinstance(ezme, list):
+        out, gorulen = [], set()
+        for v in list(taban) + list(ezme):
+            a = _anahtar(v)
+            if a not in gorulen:
+                gorulen.add(a)
+                out.append(copy.deepcopy(v))
+        return out
+    return copy.deepcopy(ezme)
+
+
+def ezme_yolu(sd: str | None) -> str | None:
+    """Proje ezme dosyasının yolu; yoksa ya da geçerli JSON sözlüğü değilse None."""
+    if not sd:
+        return None
+    yol = os.path.join(sd, EZME_AD)
+    return yol if _json_sozluk(yol) else None
+
+
 def ayar_yukle(sd: str | None = None) -> dict:
+    """Eklenti ayarı + proje ezmesi. Ezme alan türüne göre birleşir (_birlestir); ezmenin `degistir` listesindeki
+    üst düzey alanlar ve sayı/metin/bool alanlar (ör. `mod`) ezmenin değeriyle değiştirilir."""
     cfg = _json_sozluk(AYAR_DOSYASI) or copy.deepcopy(_YEDEK)
     if sd:
         ezme = _json_sozluk(os.path.join(sd, EZME_AD))
         if ezme:
-            cfg.update(ezme)
+            ezme = dict(ezme)
+            degistir = ezme.pop(DEGISTIR_ANAHTARI, None) or []
+            degistir = set(degistir) if isinstance(degistir, list) else set()
+            for k, v in ezme.items():
+                cfg[k] = copy.deepcopy(v) if (k in degistir or k not in cfg) else _birlestir(cfg[k], v)
     return cfg
 
 
@@ -385,7 +426,10 @@ def karar(arac: str, girdi: dict | None, sd: str | None = None, cfg: dict | None
 def cmd_goster(a):
     sd = a.sd or L.durum_dizini(os.getcwd())
     cfg = ayar_yukle(sd)
-    kaynak = "eklenti" + (" + proje ezmesi" if sd and os.path.exists(os.path.join(sd, EZME_AD)) else "")
+    ezme = ezme_yolu(sd)
+    kaynak = f"eklenti ({AYAR_DOSYASI})" + (f" + proje ezmesi ({ezme}; birleşir)" if ezme else "")
+    if not ezme and sd and os.path.exists(os.path.join(sd, EZME_AD)):
+        kaynak += f" (proje ezmesi okunamadı, yok sayıldı: {os.path.join(sd, EZME_AD)})"
     print(f"mod: {mod_bul(cfg)} (ayar: {cfg.get('mod')}; ORKESTRA_IZIN={os.environ.get('ORKESTRA_IZIN') or '-'}) kaynak: {kaynak}")
     for bolum, baslik in (("kabuk_yasak", "yasak (deny)"), ("kabuk_kapi", "kapı (ask)"), ("rest_kapi", "kapı: REST (ask)")):
         for m in cfg.get(bolum) or []:

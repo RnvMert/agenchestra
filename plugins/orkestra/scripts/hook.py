@@ -780,6 +780,7 @@ def _bagsiz_kabuk_kapisi(sd: str, oid, proje: str, komut: str, cwd) -> None:
     try:
         import is_onay
         kalici, bilinmeyen = is_onay.kabuk_kalici_yazimlar(komut, cwd)
+        kalici = is_onay.ayni_depo_haric(kalici, proje, cwd)  # I-433: proje dışı worktree'de aynı depoya yazım kapı dışı
     except Exception:
         return
     if not kalici and not bilinmeyen:
@@ -2469,6 +2470,10 @@ def _otomatik_is_ac(sd: str, oid, istek: str, proje: str | None = None, etiketle
                     raise
                 klasor = os.path.join(yedek_kok, ad)
                 kayit = is_kaydi.is_ac(sd, baslik, klasor, etiketler)
+            try:  # I-433: sohbet mesajından açılan iş işaretlenir; `orkestra bakim --sohbet` boş kalanları ayırır
+                is_kaydi._degistir(sd, kayit["id"], lambda k: k.__setitem__("kaynak", "sohbet"))
+            except Exception:
+                pass
         is_kaydi.is_oturum_bagla(sd, kayit["id"], str(oid))
         yol = os.path.join(sd, "oturumlar", f"{oid}.json")
         with L.kilit(yol):
@@ -2524,7 +2529,7 @@ def _otomatik_yonlendirme(sd: str, oid, istek: str, proje: str | None = None, cw
         if k == "bagla" and deger is not None and str(deger) in acik_idler:
             return _otomatik_is_ac(sd, oid, istek, proje, is_id=str(deger), cwd=cwd, guven=guven if etkin else "")
         if k == "ac":
-            if tur == "soru":  # I-138 P2: bilgi sorusu iş açmaz
+            if tur in ("soru", "yapistirma"):  # I-138 P2: bilgi sorusu iş açmaz; I-433: komut/çıktı yapıştırması da açmaz
                 return ""
             return _otomatik_is_ac(sd, oid, istek, proje, cwd=cwd)
         if k == "sec" and not etkin:  # eski davranış (is_baglama.json mod kapali): en yakın açık işe bağlanır
@@ -2758,9 +2763,21 @@ def _bag_dogrula(sd: str, oid, istek: str) -> str:
         return ""
 
 
-def _yonlendirme_ipucu(sd: str, oid, istek: str, proje: str | None = None, cwd: str | None = None) -> str:
+def _guncel_konu(oid, onceki_istek: str = "") -> str:
+    """I-433 (ORKESTRA-20): yönergedeki "Güncel konu" = bu mesajdan önceki son kullanıcı mesajının özeti; o yoksa (oturumun
+    ilk mesajı) son kayıtlı niyet. Eski niyet kaydı, kullanıcı konuyu değiştirdikten sonra güncel konu sayılmaz."""
+    if onceki_istek:
+        return onceki_istek
+    import niyet
+    k = niyet.son_niyet(oid) if oid else None
+    return (k or {}).get("ne", "")
+
+
+def _yonlendirme_ipucu(sd: str, oid, istek: str, proje: str | None = None, cwd: str | None = None,
+                       onceki_istek: str = "") -> str:
     """Bağsız oturumda önce otomatik bağla/aç/seç (P2-P3); olmazsa ya da bağlı oturumda: yeni görev mesajında
-    (soru/devam değil) açık işler + karar kuralı tek satır (K-004). Hatada boş."""
+    (soru/devam değil) açık işler + karar kuralı tek satır (K-004). `onceki_istek`: bu mesajdan önceki son kullanıcı
+    mesajının özeti (güncel konu, I-433). Hatada boş."""
     oto = _otomatik_yonlendirme(sd, oid, istek, proje, cwd=cwd)
     if oto:
         return oto
@@ -2773,9 +2790,7 @@ def _yonlendirme_ipucu(sd: str, oid, istek: str, proje: str | None = None, cwd: 
         import is_yonlendirme
         bagli = _oturum_isi(sd, oid)
         if bagli:  # I-061 P1: bağlı oturumda açıkça devam / bağlı işle ilgili mesaj susar, geri kalanı belirsizdir
-            import niyet
-            k0 = niyet.son_niyet(oid) if oid else None
-            guncel = (k0 or {}).get("ne", "")
+            guncel = _guncel_konu(oid, onceki_istek)
             bt = soru_sinif.bagli_tur(istek, sd)
             if bt == "soru":  # I-297 P4: bilgi sorusu muaf değil; yalnız kesin farklı konu yönergeye düşer
                 if not _soru_kaymasi(sd, oid, bagli, istek, guncel):
@@ -2787,11 +2802,9 @@ def _yonlendirme_ipucu(sd: str, oid, istek: str, proje: str | None = None, cwd: 
         elif soru_sinif.tur(istek, sd) != "is":  # soru ve devam mesajı yönlendirme tetiklemez
             return ""
         isler = [{"id": g["id"], "baslik": g.get("baslik") or ""} for g in is_kaydi.is_liste(sd, "acik")]
-        if bagli:  # belirsiz: hatırlatma değil zorunlu yönerge; karşılaştırma güncel konuya (son kayıtlı niyet) yapılır
-            import niyet
-            k = niyet.son_niyet(oid) if oid else None
+        if bagli:  # belirsiz: hatırlatma değil zorunlu yönerge; karşılaştırma güncel konuya (son kullanıcı mesajı) yapılır
             _bolme_bekliyor_kaydet(sd, oid, bagli)  # I-297 P5
-            return is_yonlendirme.yonlendir(isler, bagli, zorunlu=True, guncel_konu=(k or {}).get("ne", ""),
+            return is_yonlendirme.yonlendir(isler, bagli, zorunlu=True, guncel_konu=guncel,
                                             mod=_bagli_mod(sd, bagli))
         return is_yonlendirme.yonlendir(isler, bagli)
     except Exception:
@@ -3502,6 +3515,7 @@ def user_prompt_submit(inp: dict):
     if sd and not os.environ.get("ORKESTRA_PERSPEKTIF"):
         metin = L.maskele(inp.get("prompt") or "")
         istek = {}
+        onceki_istek = ""
         if not metin.lstrip().startswith("<"):  # sistem iletisi yeni istek sayılmaz (kimlik üretilmez)
             iid = L.istek_id_yeni(sd, inp.get("session_id"))
             if iid:
@@ -3509,6 +3523,7 @@ def user_prompt_submit(inp: dict):
             ne = L.ne_ozeti(metin)  # I-030 P5: kural tabanlı tek satır; boş iletide yazılmaz
             if ne:
                 istek["ne"] = ne
+            onceki_istek = L.istek_konusu_degistir(sd, inp.get("session_id"), ne)  # I-433: güncel konu (önceki mesaj)
         L.jsonl_ekle(os.path.join(sd, "gunluk.jsonl"), {"zaman": L.simdi(), "oturum": inp.get("session_id"), "tur": "istek",
                                                          "uzunluk": len(metin), **istek})  # ham mesaj yazılmaz (ADR-0169)
         # Niyet kaydı: kullanıcı yazdı → Claude çalışıyor. Sistem iletileri (<agent-message>, <task-notification>) istek metni sayılmaz.
@@ -3525,7 +3540,7 @@ def user_prompt_submit(inp: dict):
         if not sistem:
             parcalar = [asili_uyari(sd, inp.get("session_id")),
                         _yonlendirme_ipucu(sd, inp.get("session_id"), metin, L.proje_dizini(inp.get("cwd")),
-                                           cwd=inp.get("cwd"))]
+                                           cwd=inp.get("cwd"), onceki_istek=onceki_istek)]
             _niyet_otomatik(sd, inp.get("session_id"), L.proje_dizini(inp.get("cwd")), metin)  # iş açıldıktan sonra
             try:  # ADR-0169: niyet defteri yönergesi (ajan mesajdaki niyetleri yazar); hata hook'u düşürmez
                 import niyet_defteri_kapi

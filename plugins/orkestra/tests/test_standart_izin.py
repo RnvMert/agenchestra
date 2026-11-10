@@ -36,7 +36,9 @@ class JiraIzinUyari(unittest.TestCase):
         self.assertNotIn("onaya tabi", m)
 
     def test_serbest_politika_ve_eski_metin_uyari_verir(self):
-        self.yaz("izin_politikasi.json", json.dumps({"mod": "genis", "mcp": [], "rest_kapi": []}))
+        # ezme listeleri varsayılanla birleşir (I-433); kapıları boşaltmak için alanlar "degistir" ile açıkça değiştirilir
+        self.yaz("izin_politikasi.json", json.dumps({"mod": "genis", "mcp": [], "rest_kapi": [],
+                                                     "degistir": ["mcp", "rest_kapi"]}))
         self.yaz("standartlar/jira_yorum.md", "# x\n- " + ESKI + "\n")
         u = bakim.jira_izin_uyari(self.sd)
         self.assertIn("uyarı", u)

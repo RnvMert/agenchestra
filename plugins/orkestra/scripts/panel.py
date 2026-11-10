@@ -806,11 +806,12 @@ def _onay_islemi(sd: str, g: dict):
     if islem == "karar":
         return onay.karar_ver(sd, g.get("id"), g.get("sonuc"), g.get("secim"), g.get("not"), kim="panel")
     if islem == "kural-ekle":
-        return onay.kural_ekle(sd, g.get("metin") or "", g.get("neden") or "", katman=g.get("katman") or "proje")
+        return onay.kural_ekle(sd, g.get("metin") or "", g.get("neden") or "", katman=g.get("katman") or "proje",
+                               ozet=g.get("ozet"))
     if islem == "kural-tasi":
-        return onay.kural_tasi(sd, g.get("id"), g.get("katman") or "")
+        return onay.kural_tasi(sd, g.get("id"), g.get("katman") or "", ozet=g.get("ozet"))
     if islem == "kural-duzenle":
-        return onay.kural_duzenle(sd, g.get("id"), g.get("metin") or "", g.get("neden"))
+        return onay.kural_duzenle(sd, g.get("id"), g.get("metin") or "", g.get("neden"), ozet=g.get("ozet"))
     if islem == "kural-kaldir":
         return onay.kural_kaldir(sd, g.get("id"), g.get("not") or "")
     if islem == "simdi-uygula":
