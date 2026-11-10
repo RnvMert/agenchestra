@@ -9,7 +9,7 @@ Model kanalı sayısı: 3.
 
 - **Alıcı:** model
 - **Düğme:** hayır
-- **hook.py'de geçiş:** 7
+- **hook.py'de geçiş:** 8
 - **Not:** Modele bağlam; kullanıcı görmez. Model cümleyi kendi sözleriyle yazar, biçim güvenilmez.
 
 ### systemMessage
@@ -23,7 +23,7 @@ Model kanalı sayısı: 3.
 
 - **Alıcı:** model
 - **Düğme:** hayır
-- **hook.py'de geçiş:** 9
+- **hook.py'de geçiş:** 10
 - **Not:** Turu zorla sürdürür; reason modele gider.
 
 ### permissionDecision

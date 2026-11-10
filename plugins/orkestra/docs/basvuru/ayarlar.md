@@ -4,7 +4,7 @@
 
 Kaynak: `ayarlar/*.json`. Proje ezmesi: `.claude/orkestra/<ad>.json`. `mod`: `golge` (uyarır, engellemez), `ihlal` (reddeder), `kapali`.
 
-Toplam 100 ayar; `açıklama yok` işaretli: 33.
+Toplam 102 ayar; `açıklama yok` işaretli: 33.
 
 | Ayar | Mod | Açıklama |
 |---|---|---|
@@ -49,6 +49,7 @@ Toplam 100 ayar; `açıklama yok` işaretli: 33.
 | `iddia_kaynak` | golge | açıklama yok |
 | `is_baglama` | etkin | açıklama yok |
 | `is_esleme` | — | açıklama yok |
+| `is_klasoru_silme` | golge | Kayıtlı iş klasörü silme uyarısı (I-433, ORKESTRA-20). |
 | `istek_defteri` | golge | ADR-0112 istek defteri kapısı. |
 | `iz_kapsama` | — | açıklama yok |
 | `izin_politikasi` | genis | genis: kapı dışındaki her araç çağrısı onaysız (hook allow; kullanıcının settings deny/ask kuralları yine geçerli). |
@@ -58,6 +59,7 @@ Toplam 100 ayar; `açıklama yok` işaretli: 33.
 | `kanitsiz_iddia` | golge | açıklama yok |
 | `kapanis_birlestirme` | ihlal | Kapanışta güvenli birleştirme ve biten worktree temizliği (I-225, ADR-0086). |
 | `kapanis_surec` | golge | ADR-0163 (I-387, P-014, P-045): kullanıcıya giden son mesajda ajanın kendi iç sürecini anlatan cümleler günlüğe kural_ihlal / kapanis_surec düşer. |
+| `kapi_atlatma` | golge | Ajanın kapanış kapılarını atlatması (I-433, ORKESTRA-12). |
 | `karar_kapisi` | ihlal | ADR-0112 açık karar kapısı. |
 | `kart_kontrol` | ihlal | Kart açılışında her kabul kriteri ölçülebilir 'kontrol:' alanı taşır (komut, dosya:satır ya da sayı) ve ölçüsüz ifade içermez. |
 | `kart_soru` | — | açıklama yok |

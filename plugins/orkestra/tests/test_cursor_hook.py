@@ -120,3 +120,36 @@ def test_stop_alanlari_none_gelince_cokmez():
     c = ch.girdi_donustur("stop", {"workspace_roots": None, "tool_input": None})
     assert c["hook_event_name"] == "Stop"
     assert ch.calistir("stop", b"null") == ("{}", 0, "")
+
+
+def test_session_start_istemden_sonra_gelirse_baglam_ilk_istemde_verilir(tmp_path, monkeypatch):
+    """Cursor sessionStart'ı bazen ilk beforeSubmitPrompt'tan sonra gönderir: bağlam ilk istemde üretilir, geç gelen atlanır."""
+    stub = _kod(tmp_path, "import sys,json\n"
+                "g=json.load(sys.stdin)\n"
+                "ad=g['hook_event_name']\n"
+                "print(json.dumps({'hookSpecificOutput':{'hookEventName':ad,'additionalContext':'ctx:'+ad}}))\n")
+    monkeypatch.setenv("ORKESTRA_CURSOR_HOOK_PY", stub)
+    monkeypatch.setenv("ORKESTRA_CURSOR_TEKIL_DIZIN", str(tmp_path / "tekil"))
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    g = {"conversation_id": "abc-1", "workspace_roots": ["x"]}
+    istem = json.dumps(dict(g, hook_event_name="beforeSubmitPrompt", prompt="merhaba")).encode()
+    metin, kod, _ = ch.calistir("beforeSubmitPrompt", istem)
+    cikti = json.loads(metin)
+    assert kod == 0 and cikti["additional_context"].splitlines() == ["ctx:SessionStart", "ctx:UserPromptSubmit"]
+    # geç gelen sessionStart bağlamı ikinci kez vermez
+    assert ch.calistir("sessionStart", json.dumps(dict(g, hook_event_name="sessionStart")).encode()) == ("{}", 0, "")
+    # ikinci istem yalnız kendi bağlamını taşır
+    assert json.loads(ch.calistir("beforeSubmitPrompt", istem)[0])["additional_context"] == "ctx:UserPromptSubmit"
+
+
+def test_session_start_zamaninda_gelirse_degisiklik_yok(tmp_path, monkeypatch):
+    stub = _kod(tmp_path, "import sys,json\n"
+                "g=json.load(sys.stdin)\n"
+                "ad=g['hook_event_name']\n"
+                "print(json.dumps({'hookSpecificOutput':{'hookEventName':ad,'additionalContext':'ctx:'+ad}}))\n")
+    monkeypatch.setenv("ORKESTRA_CURSOR_HOOK_PY", stub)
+    monkeypatch.setenv("ORKESTRA_CURSOR_TEKIL_DIZIN", str(tmp_path / "tekil"))
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    g = {"conversation_id": "abc-2", "workspace_roots": ["x"]}
+    assert json.loads(ch.calistir("sessionStart", json.dumps(dict(g, hook_event_name="sessionStart")).encode())[0]) == {"additional_context": "ctx:SessionStart"}
+    assert json.loads(ch.calistir("beforeSubmitPrompt", json.dumps(dict(g, hook_event_name="beforeSubmitPrompt")).encode())[0])["additional_context"] == "ctx:UserPromptSubmit"

@@ -1,4 +1,5 @@
 {
   "mod": "ihlal",
-  "aciklama": "mod: golge = teslim eksiği (PR, CI, inceleme) uyarılır ve gunluk.jsonl'a kapi_golge olarak düşer, is kapat engellenmez; ihlal = eksik varsa is kapat reddedilir. Yalnız origin uzak deposu olan ve iş açıldığından beri kod dosyası değişen işlerde çalışır. Kapatma: ORKESTRA_TESLIM_KAPISI=0. Proje ezmesi: .claude/orkestra/teslim.json (ADR-0035)."
+  "uzak_depo": "origin",
+  "aciklama": "mod: golge = teslim eksiği (PR, CI, inceleme) uyarılır ve gunluk.jsonl'a kapi_golge olarak düşer, is kapat engellenmez; ihlal = eksik varsa is kapat reddedilir. Yalnız uzak_depo adlı uzak deposu (varsayılan origin; I-433) olan ve iş açıldığından beri kod dosyası değişen işlerde çalışır; o uzak yoksa kapı susar. PR'sız depoda kullanıcı terminalinden `orkestra is kapat <iş> --yerel-birlesme <commit>`: commit ana dalda ise (ana_dal alanı; yoksa <uzak>/HEAD, main, master, init.defaultBranch) PR yerine kabul edilir, ajan oturumunda reddedilir. Kapatma: ORKESTRA_TESLIM_KAPISI=0. Proje ezmesi: .claude/orkestra/teslim.json (anahtar bazında; ADR-0035)."
 }

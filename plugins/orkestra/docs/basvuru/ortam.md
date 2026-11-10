@@ -2,7 +2,7 @@
 
 # Ortam değişkenleri
 
-Kaynakta geçen 141 değişken. `…_KAPISI=0` ilgili kapıyı kapatır.
+Kaynakta geçen 144 değişken. `…_KAPISI=0` ilgili kapıyı kapatır.
 
 | Değişken | Geçtiği betikler |
 |---|---|
@@ -35,6 +35,7 @@ Kaynakta geçen 141 değişken. `…_KAPISI=0` ilgili kapıyı kapatır.
 | `ORKESTRA_CURSOR_DEBUG` | cursor_hook.py, cursor_sonda.py |
 | `ORKESTRA_CURSOR_HOOK_PY` | cursor_hook.py |
 | `ORKESTRA_CURSOR_KOMUT_YAZ` | cursor_hook.py, cursor_sonda.py, doktor.py |
+| `ORKESTRA_CURSOR_OTURUM_ISARET` | cursor_hook.py |
 | `ORKESTRA_CURSOR_TEKIL` | cursor_hook.py |
 | `ORKESTRA_CURSOR_TEKIL_DIZIN` | cursor_hook.py |
 | `ORKESTRA_DAL_TEMIZLE` | dal_temizle.py |
@@ -69,6 +70,7 @@ Kaynakta geçen 141 değişken. `…_KAPISI=0` ilgili kapıyı kapatır.
 | `ORKESTRA_KAPANIS_BIRLESTIRME` | dal_temizle.py |
 | `ORKESTRA_KAPANIS_KAPISI` | hook.py |
 | `ORKESTRA_KAPANIS_SUREC` | kapanis_surec.py |
+| `ORKESTRA_KAPI_ATLATMA_KAPISI` | kapi_atlatma.py |
 | `ORKESTRA_KARAR_KAPISI` | karar_kapisi.py |
 | `ORKESTRA_KART_GOLGE` | hook.py |
 | `ORKESTRA_KART_KONTROL` | kart.py, test_paralel.py |
@@ -80,6 +82,7 @@ Kaynakta geçen 141 değişken. `…_KAPISI=0` ilgili kapıyı kapatır.
 | `ORKESTRA_KIMLIK_HATIRLATMA` | kimlik_hatirlatma.py |
 | `ORKESTRA_KIMLIK_OKUMA` | izin_politikasi.py |
 | `ORKESTRA_KIMLIK_PROJE` | kimlik.py |
+| `ORKESTRA_KLASOR_SILME_KAPISI` | is_klasoru_silme.py |
 | `ORKESTRA_KOK_NEDEN` | kok_neden_enjeksiyonu.py |
 | `ORKESTRA_KONU_DEFTERI` | konu_defteri.py |
 | `ORKESTRA_KOPYA_YAZMA` | ork_lib.py |

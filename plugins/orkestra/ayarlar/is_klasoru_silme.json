@@ -1,0 +1,4 @@
+{
+  "mod": "golge",
+  "aciklama": "Kayıtlı iş klasörü silme uyarısı (I-433, ORKESTRA-20). Kabuk komutu rm/rmdir/rd/del/Remove-Item, mv/Move-Item (kaynak), git worktree remove ya da git clean ile isler.json'daki bir iş klasörünü, üst klasörünü ya da içindeki belgeyi hedefliyorsa: golge = uyarı (hangi iş, hangi klasör, iş belgeleri silinir) + gunluk.jsonl'a kapi_golge; ihlal = ret. Değişkenli/dolaylı yol yakalanmaz (en iyi çaba). P-028: gölge önce. Kapatma: ORKESTRA_KLASOR_SILME_KAPISI=0. Proje ezmesi: .claude/orkestra/is_klasoru_silme.json."
+}

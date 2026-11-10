@@ -1,0 +1,4 @@
+{
+  "mod": "golge",
+  "aciklama": "Ajanın kapanış kapılarını atlatması (I-433, ORKESTRA-12). Ajan kabuğunda `orkestra is kapat … --ozetsiz` ya da ORKESTRA_<AD>_KAPISI=0 (off/false/no/hayır/kapali; export, set, env, $env: biçimleri dahil) ataması: golge = uyarı + gunluk.jsonl'a kapi_golge, engel yok; ihlal = ret (kullanıcı kendi terminalinde çalıştırır). `is kapat --yerel-birlesme` ajan kabuğunda moddan bağımsız reddedilir. P-028: gölge önce; ihlale geçiş ölçüm ve ADR ile. Kapatma: ORKESTRA_KAPI_ATLATMA_KAPISI=0. Proje ezmesi: .claude/orkestra/kapi_atlatma.json."
+}

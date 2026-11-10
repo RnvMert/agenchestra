@@ -789,6 +789,7 @@ def kapat_uygula(sd, is_id):
     """Kapıları geçmiş işi kapatır (etki yeniden doğrulama, harita yenileme, durum, teknik detay)."""
     _etki_kapanis(sd, is_id)
     _harita_yenile(sd)
+    __import__("teslim").bekliyor_yaz(sd, is_id, "")  # I-433: kapanan iş artık karar beklemez
     _ik().is_durum(sd, is_id, "kapandi")
     _teknik_detay_yaz(sd, is_id)
     try:  # I-201, ADR-0050; I-225, ADR-0086: kapanışta birleştirme ve dal/worktree temizliği (kipler ayarda); kapanışı asla bozmaz
@@ -824,6 +825,24 @@ def cmd_is_teslim(a):
     print(f"{a.is_id} teslim: pr={t.get('pr', '-')} inceleme={t.get('inceleme', '-')}")
 
 
+def _yerel_birlesme(sd, a, kayit):
+    """I-433: `is kapat --yerel-birlesme <commit>` yalnız kullanıcı terminalinde (hook kimlik eklemez); commit ana dalda
+    değilse ret, doğruysa kanıt is.json `teslim.yerel_birlesme`ye yazılır. Özet ve ADR kapıları yine çalışır."""
+    if getattr(a, "ajan_id", None) or getattr(a, "ajan_tipi", None):
+        hata("--yerel-birlesme ajan oturumunda kullanılamaz: kullanıcı kendi terminalinde çalıştırır "
+             f"(`orkestra is kapat {a.is_id} --yerel-birlesme <commit>`).", 3)
+    import teslim as _teslim
+    klasor = str(kayit.get("klasor") or "")
+    git_kok = L.git_koku(klasor) if klasor and os.path.isdir(klasor) else None
+    if not git_kok:
+        hata(f"{a.is_id}: iş klasörü bir git deposunda değil; --yerel-birlesme doğrulanamaz")
+    kanit, neden = _teslim.yerel_birlesme_dogrula(git_kok, a.yerel_birlesme, klasor)
+    if not kanit:
+        hata(f"{a.is_id} kapatılamadı: --yerel-birlesme reddedildi ({neden})")
+    print(f"yerel birleşme doğrulandı: {kanit['commit'][:12]} {kanit['dal']} dalında")
+    return _teslim.yerel_birlesme_kaydet(sd, a.is_id, kanit)
+
+
 def cmd_is_kapat(a):
     """Kapanış kapıları: görev bitiş raporu (P-009) ve ADR kaydı (P-015) zorunlu.
     ORKESTRA_OZET_KAPISI=0 / ORKESTRA_ADR_KAPISI=0 kapıyı kapatır; hiç iş yapılmadan kapanan iş için `--ozetsiz NEDEN`
@@ -834,6 +853,8 @@ def cmd_is_kapat(a):
     if getattr(a, "pr", None) or getattr(a, "inceleme", None):
         import teslim as _teslim
         kayit = _teslim.kaydet_girdi(sd, a.is_id, a.pr or "", a.inceleme or "")
+    if getattr(a, "yerel_birlesme", None):
+        kayit = _yerel_birlesme(sd, a, kayit)
     engel = kapanis_eksigi(sd, kayit, ozetsiz)
     if engel:
         hata(f"{a.is_id} kapatılamadı: {engel[1]}")
@@ -972,6 +993,14 @@ def cmd_is_todo(a):
 def _ozet_tetikle(kayit):
     """P-009 erken tetik: son todo maddesi bitince çalışma özeti iskeletini açar ve doldurulmasını ister.
     Kapatmayı engellemez; kapı kapalıyken (ORKESTRA_OZET_KAPISI=0) sessizdir. Hata todo yazımını bozmaz."""
+    try:  # I-433: PR/kullanıcı kararı bekleyen işte kapanış istenmez; kullanıcı kararı beklenir
+        import teslim as _teslim
+        neden = _teslim.bekliyor_neden(kayit)
+        if neden:
+            print(_teslim.bekliyor_hatirlatma(kayit["id"], neden))
+            return
+    except Exception:
+        pass
     if os.environ.get("ORKESTRA_OZET_KAPISI") == "0":
         return
     try:
@@ -1497,6 +1526,8 @@ def kaydet(alt):
     ik_.add_argument("--ozetsiz", metavar="NEDEN", help="görev bitiş raporu (çalışma özeti) olmadan kapat; neden zorunlu (P-009)")
     ik_.add_argument("--pr", metavar="BAĞLANTI", help="teslim kapısı: kapanıştan önce PR bağlantısını kaydeder (ADR-0035)")
     ik_.add_argument("--inceleme", metavar="NOT", help="teslim kapısı: inceleme kaydı (kim/ne); GitHub onayı yoksa gerekir")
+    ik_.add_argument("--yerel-birlesme", dest="yerel_birlesme", metavar="COMMIT",
+                     help="teslim kapısı: PR yerine ana dalda olan commit (git merge-base --is-ancestor); yalnız kullanıcı terminalinde (I-433)")
     ik_.set_defaults(f=cmd_is_kapat)
     ite = is_.add_parser("teslim", help="PR bağlantısı ve inceleme notunu işe kaydeder (teslim kapısı, ADR-0035)")
     ite.add_argument("is_id")

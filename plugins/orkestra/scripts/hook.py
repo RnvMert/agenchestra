@@ -241,11 +241,13 @@ def _test_yonlendirme(komut: str, cwd: str | None) -> str:
     return f"orkestra (gölge, {TEST_YONLENDIRME_KAPI}): {ileti}"
 
 
-def izin_ver(guncel_girdi: dict | None = None, neden: str = ""):
+def izin_ver(guncel_girdi: dict | None = None, neden: str = "", ek: str = ""):
     o = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                 "permissionDecisionReason": neden or "orkestra"}}
     if guncel_girdi is not None:
         o["hookSpecificOutput"]["updatedInput"] = guncel_girdi
+    if ek:  # gölge kapı uyarısı (ör. I-433 kapi_atlatma) izinli orkestra komutunda da modele ulaşır
+        o["hookSpecificOutput"]["additionalContext"] = ek
     L.hook_cikti(o)
 
 
@@ -1063,6 +1065,30 @@ def _arsiv_dugmesi_yanit(sd: str, oid, inp: dict) -> None:
         return
 
 
+def _kapi_atlatma_kapisi(komut: str, cwd) -> None:
+    """I-433 (ORKESTRA-12): ajan kabuğunda `is kapat --ozetsiz` / ORKESTRA_*_KAPISI=0 ataması (gölge: uyarı + kapi_golge;
+    ihlal: ret) ve `is kapat --yerel-birlesme` (her modda ret). Hatada serbest (kapi_atlatma.denetle)."""
+    global _BEKLEYEN_UYARI
+    import kapi_atlatma
+    karar, ileti = kapi_atlatma.denetle(komut, cwd)
+    if karar == "ret":
+        reddet(ileti)
+    elif karar == "golge":
+        _BEKLEYEN_UYARI = (_BEKLEYEN_UYARI + "\n" + ileti).strip()
+
+
+def _klasor_silme_kapisi(sd: str, komut: str, cwd) -> None:
+    """I-433 (ORKESTRA-20): kayıtlı iş klasörünü silen/taşıyan kabuk komutu (gölge: uyarı + kapi_golge; ihlal: ret).
+    Hatada serbest (is_klasoru_silme.denetle)."""
+    global _BEKLEYEN_UYARI
+    import is_klasoru_silme
+    karar, ileti = is_klasoru_silme.denetle(sd, komut, cwd or os.getcwd(), L.proje_dizini(cwd))
+    if karar == "ret":
+        reddet(ileti)
+    elif karar == "golge":
+        _BEKLEYEN_UYARI = (_BEKLEYEN_UYARI + "\n" + ileti).strip()
+
+
 def _kapi_uygula(kar, neden: str):
     if kar == "deny":
         reddet(neden)
@@ -1385,6 +1411,8 @@ def pre_tool_use(inp: dict):
         if arac == "Bash" and _PS_CMDLET.search(tirnaksiz):  # Bash'e PowerShell sözdizimi: engellenmez, davranış hatası olarak kaydedilir
             _davranis_yaz("kabuk-sozdizimi", komut[:120])
         _onay_kapisi(sd, inp.get("session_id"), L.proje_dizini(inp.get("cwd")), tirnaksiz=tirnaksiz)
+        _kapi_atlatma_kapisi(komut, inp.get("cwd"))
+        _klasor_silme_kapisi(sd, komut, inp.get("cwd"))
         try:  # I-309 P6: çıplak tam test koşusu → test_paralel.py yönlendirmesi (gölge: kayıt + ipucu); hata aracı bozmaz
             ty = _test_yonlendirme(komut, inp.get("cwd"))
             if ty:
@@ -1403,7 +1431,7 @@ def pre_tool_use(inp: dict):
             kimlik_id = aid or "ana"
             kimlik_tip = atip or ("ana" if not aid else "bilinmiyor")
             girdi["command"] = f"{temiz} --ajan-id {kimlik_id} --ajan-tipi {kimlik_tip}"
-            izin_ver(girdi, "orkestra CLI (kimlik eklendi)")
+            izin_ver(girdi, "orkestra CLI (kimlik eklendi)", ek=_BEKLEYEN_UYARI)
         if KABUK_YAZMA_HEDEF.search(komut):
             reddet("orkestra durum dosyalarına kabukla yazılmaz; `orkestra` CLI'ını kullan.")
         gec()
@@ -2110,6 +2138,18 @@ def _kapanis_kapisi(sd: str, oid, inp: dict) -> None:
         t = is_kaydi.todo_ozet(g["klasor"])
         if not t["toplam"] or t["acik_maddeler"]:
             return
+        import teslim as _teslim
+        bekliyor = _teslim.bekliyor_neden(is_kaydi.is_al(sd, is_id))
+        if bekliyor:  # I-433: PR/kullanıcı kararı bekleyen iş: kapanış istenmez; aynı neden için tek hatırlatma
+            iz = os.path.join(sd, "oturumlar", f"{oid}.bekliyor.json")
+            try:
+                with open(iz, encoding="utf-8") as f:
+                    if json.load(f).get(is_id) == bekliyor:
+                        return
+            except (OSError, ValueError, AttributeError):
+                pass
+            L.atomik_yaz(iz, json.dumps({is_id: bekliyor}, ensure_ascii=False))
+            L.hook_cikti({"decision": "block", "reason": "Orkestra: " + _teslim.bekliyor_hatirlatma(is_id, bekliyor)})
         adim = (f"`orkestra is belge {is_id} ozet` ile çalışma özetini doldur, sonra " if isler._ozet_eksigi(g["klasor"]) else "")
         L.jsonl_ekle(os.path.join(sd, "gunluk.jsonl"), {"zaman": L.simdi(), "oturum": oid, "tur": "kural_ihlal",
                                                          "kural": "kapanis_atlandi", "is": is_id,
@@ -2407,8 +2447,12 @@ def _kapanis_notlari(sd: str, liste: list) -> dict:
                 continue
         a = is_yonlendirme.kapanis_adaylari(ozetler, _dt.datetime.now().astimezone())
         notlar = {}
+        import teslim as _teslim
         for i in a.get("kapat", []):
             try:
+                if _teslim.bekliyor_neden(is_kaydi.is_al(sd, i)):  # I-433: PR/kullanıcı kararı bekleyen iş kendiliğinden kapanmaz
+                    notlar[i] = " · bekliyor: kullanıcı kararı (PR/inceleme)"
+                    continue
                 is_kaydi.is_durum(sd, i, "kapandi")
                 notlar[i] = " · otomatik kapandı"
             except Exception:

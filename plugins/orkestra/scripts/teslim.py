@@ -1,11 +1,14 @@
 """Teslim kapısı (ADR-0035, P3): kod değişikliği taşıyan işin kapanışında PR, CI sonucu ve inceleme kaydı.
 
-Kapı yalnız şu durumda denetler: `ORKESTRA_TESLIM_KAPISI` kapalı değil, işin git ağacında `origin` uzak deposu var ve iş açıldığından
-beri kod dosyası değişmiş. Aksi hâlde muaftır (uzak deposuz projeler, yalnız belge işleri). Mod `ayarlar/teslim.json`:
+Kapı yalnız şu durumda denetler: `ORKESTRA_TESLIM_KAPISI` kapalı değil, işin git ağacında ayardaki uzak depo (`uzak_depo`,
+varsayılan `origin`; I-433) var ve iş açıldığından beri kod dosyası değişmiş. Aksi hâlde muaftır (uzak deposuz projeler, yalnız belge işleri). Mod `ayarlar/teslim.json`:
 golge uyarır ve `kapi_golge` kaydı düşer, ihlal `is kapat`ı reddeder (kapi_mod.py).
 
 İnceleme kanıtı: PR'ın GitHub `reviewDecision` değeri APPROVED ya da `orkestra is teslim <iş> --inceleme "<kim/ne>"` kaydı.
 `gh` çağrısı `_gh` ile yapılır; testler bunu değiştirir.
+Yerel birleşme (I-433): PR'sız depoda kullanıcı terminalinden `orkestra is kapat <iş> --yerel-birlesme <commit>`; commit ana dalda
+(`ana_dal` ayarı, yoksa uzak HEAD, `main`, `master`) ise teslim kaydına `yerel_birlesme` yazılır ve kapı PR yerine onu kabul eder.
+PR ya da kullanıcı kararı beklenen işte is.json `bekliyor: <neden>` alanı tutulur (kapanışta silinir).
 """
 from __future__ import annotations
 
@@ -34,8 +37,105 @@ def _gh(args: list[str], cwd: str) -> subprocess.CompletedProcess:
         return subprocess.CompletedProcess(args, 1, "", str(e))
 
 
-def uzak_var_mi(git_kok: str) -> bool:
-    return L.git(["remote", "get-url", "origin"], git_kok).returncode == 0
+VARSAYILAN_UZAK = "origin"
+
+
+def ayar(klasor: str | None = None) -> dict:
+    """`ayarlar/teslim.json` + proje ezmesi (`<durum>/teslim.json`, anahtar bazında); bozuk/eksik dosya atlanır."""
+    kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    yollar = [os.path.join(kok, "ayarlar", "teslim.json")]
+    sd = L.durum_dizini(klasor) if klasor else None
+    if sd:
+        yollar.append(os.path.join(sd, "teslim.json"))
+    d: dict = {}
+    for yol in yollar:
+        try:
+            with open(yol, encoding="utf-8") as f:
+                v = json.load(f)
+            if isinstance(v, dict):
+                d.update(v)
+        except (OSError, ValueError):
+            pass
+    return d
+
+
+def uzak_adi(klasor: str | None = None) -> str:
+    """Teslim kapısının baktığı uzak depo adı (`uzak_depo`; varsayılan `origin`)."""
+    ad = str(ayar(klasor).get("uzak_depo") or "").strip()
+    return ad or VARSAYILAN_UZAK
+
+
+def uzak_var_mi(git_kok: str, ad: str = VARSAYILAN_UZAK) -> bool:
+    return bool(ad) and L.git(["remote", "get-url", ad], git_kok).returncode == 0
+
+
+def ana_dal(git_kok: str, klasor: str | None = None) -> str | None:
+    """Ana dal: ayardaki `ana_dal`; yoksa `<uzak>/HEAD`'in gösterdiği dal; yoksa yerelde `main`, `master`,
+    `init.defaultBranch` sırasıyla var olan ilk dal. Bulunamazsa None."""
+    a = str(ayar(klasor or git_kok).get("ana_dal") or "").strip()
+    if a:
+        return a
+    uzak = uzak_adi(klasor or git_kok)
+    r = L.git(["symbolic-ref", "--quiet", "--short", f"refs/remotes/{uzak}/HEAD"], git_kok)
+    if r.returncode == 0 and r.stdout.strip():
+        uzak_dal = r.stdout.strip()  # `<uzak>/<dal>`
+        yerel = uzak_dal.split("/", 1)[-1]
+        # yerel birleşme henüz itilmemiş olabilir: aynı adlı yerel dal varsa o, yoksa uzak izleme dalı
+        return yerel if L.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{yerel}"], git_kok).returncode == 0 else uzak_dal
+    adaylar = ["main", "master"]
+    r = L.git(["config", "--get", "init.defaultBranch"], git_kok)
+    if r.returncode == 0 and r.stdout.strip():
+        adaylar.append(r.stdout.strip())
+    for d in adaylar:
+        if L.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{d}"], git_kok).returncode == 0:
+            return d
+    return None
+
+
+def yerel_birlesme_dogrula(git_kok: str, commit: str, klasor: str | None = None) -> tuple[dict | None, str]:
+    """Commit ana dalda mı (`git merge-base --is-ancestor`)? (kanıt, '') ya da (None, neden)."""
+    commit = (commit or "").strip()
+    if not commit or commit.startswith("-"):
+        return None, "commit verilmedi"
+    r = L.git(["rev-parse", "--verify", "--quiet", commit + "^{commit}"], git_kok)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None, f"commit bulunamadı: {commit}"
+    sha = r.stdout.strip()
+    dal = ana_dal(git_kok, klasor)
+    if not dal:
+        return None, "ana dal bulunamadı (ayarlar/teslim.json ya da .claude/orkestra/teslim.json `ana_dal` ile ver)"
+    if L.git(["merge-base", "--is-ancestor", sha, dal], git_kok).returncode != 0:
+        return None, f"commit {sha[:12]} ana dalda ({dal}) değil"
+    return {"commit": sha, "dal": dal, "zaman": L.simdi()}, ""
+
+
+def bekliyor_neden(kayit: dict | None) -> str:
+    """İşin `bekliyor` alanı (PR/kullanıcı kararı bekleniyor); yoksa ''."""
+    return str((kayit or {}).get("bekliyor") or "").strip()
+
+
+def bekliyor_hatirlatma(is_id: str, neden: str) -> str:
+    """Todo'su biten ama PR/kullanıcı kararı bekleyen işin hatırlatması: kapanış komutu ya da kapıyı geçme seçeneği
+    sunmaz; model kullanıcı kararını bekler (I-433)."""
+    return (f"{is_id}: tüm todo maddeleri bitti, iş açık kalır; kullanıcı kararını bekle (PR/inceleme): {neden[:200]}. "
+            "Yanıtta yalnız bekleyen kararı ve bağlantısını bildir, başka seçenek önerme; birleştirme/inceleme kararı "
+            "kullanıcınındır.")
+
+
+def bekliyor_yaz(sd: str, is_id: str, neden: str) -> None:
+    """is.json `bekliyor` alanını yazar (boş neden siler). Kaydı olmayan iş ya da hata kapıyı bozmaz."""
+    try:
+        import is_kaydi
+
+        def islem(k):
+            if neden:
+                k["bekliyor"] = neden[:300]
+            else:
+                k.pop("bekliyor", None)
+
+        is_kaydi._degistir(sd, is_id, islem)
+    except Exception:
+        pass
 
 
 def kod_dosyalari(git_kok: str, klasor: str, baslangic: str | None) -> list[str]:
@@ -100,12 +200,15 @@ def teslim_eksigi(sd: str, kayit: dict) -> list[str]:
         return []
     klasor = str(kayit.get("klasor") or "")
     git_kok = L.git_koku(klasor) if klasor and os.path.isdir(klasor) else None
-    if not git_kok or not uzak_var_mi(git_kok):
+    if not git_kok or not uzak_var_mi(git_kok, uzak_adi(klasor)):
         return []
     dosyalar = kod_dosyalari(git_kok, klasor, kayit.get("olusturma"))
     if not dosyalar:
         return []
     t = kayit.get("teslim") if isinstance(kayit.get("teslim"), dict) else {}
+    yb = t.get("yerel_birlesme") if isinstance(t.get("yerel_birlesme"), dict) else None
+    if yb and yerel_birlesme_dogrula(git_kok, str(yb.get("commit") or ""), klasor)[0]:
+        return []  # I-433: kullanıcı terminalinde doğrulanmış yerel birleşme PR yerine geçer (kapanışta yeniden doğrulanır)
     pr = pr_oku(str(t.get("pr") or ""), git_kok)
     eksik = []
     gh_yok = pr is None and shutil.which("gh") is None
@@ -132,7 +235,10 @@ def teslim_eksigi(sd: str, kayit: dict) -> list[str]:
             {"ci": ci, "pr_url": (pr or {}).get("url") or t.get("pr") or "", "zaman": L.simdi()}))
     except Exception:  # kayıt kapıyı bozmaz
         pass
-    return KM.ihlal_ver(klasor, "teslim", eksik)
+    sonuc = KM.ihlal_ver(klasor, "teslim", eksik)
+    if sonuc and kayit.get("id"):  # I-433: kapanış PR/inceleme beklediği için reddedildi → iş kullanıcı kararını bekler
+        bekliyor_yaz(sd, kayit["id"], "teslim: " + sonuc[0])
+    return sonuc
 
 
 def kaydet_girdi(sd: str, is_id: str, pr: str = "", inceleme: str = "") -> dict:
@@ -143,7 +249,18 @@ def kaydet_girdi(sd: str, is_id: str, pr: str = "", inceleme: str = "") -> dict:
         t = k.setdefault("teslim", {})
         if pr:
             t["pr"] = pr
+            k["bekliyor"] = f"PR: {pr}"[:300]  # I-433: PR açıldı → birleştirme/inceleme kullanıcı kararını bekler
         if inceleme:
             t["inceleme"] = inceleme
+
+    return is_kaydi._degistir(sd, is_id, islem)
+
+
+def yerel_birlesme_kaydet(sd: str, is_id: str, kanit: dict) -> dict:
+    """`is kapat --yerel-birlesme`: doğrulanmış kanıt is.json `teslim.yerel_birlesme` alanına yazılır."""
+    import is_kaydi
+
+    def islem(k):
+        k.setdefault("teslim", {})["yerel_birlesme"] = kanit
 
     return is_kaydi._degistir(sd, is_id, islem)

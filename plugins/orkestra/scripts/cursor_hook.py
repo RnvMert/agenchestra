@@ -184,6 +184,41 @@ def _hook_py():
     return os.environ.get("ORKESTRA_CURSOR_HOOK_PY") or os.path.join(_kok_dizin(), "scripts", "hook.py")
 
 
+def _oturum_isareti(sohbet, cursor_olay):
+    """Cursor `sessionStart`ı bazen ilk `beforeSubmitPrompt`tan SONRA gönderir (08-10.11.2026 Cursor günlüklerinde 15 sohbetin 5'i).
+    Oturum bağlamı (bağlı iş, kurallar yolu) ilk istemde eksik kalmasın diye sohbet başına tek işaret tutulur.
+    Dönüş: 'normal' (sıra doğru ya da sohbet kimliği yok), 'onden' (istem sessionStart'tan önce geldi: bağlamı şimdi üret),
+    'gec' (sessionStart istemden sonra geldi: bağlam zaten verildi, atla). ORKESTRA_CURSOR_OTURUM_ISARET=0 kapatır."""
+    if os.environ.get("ORKESTRA_CURSOR_OTURUM_ISARET") == "0" or not isinstance(sohbet, str) or not sohbet:
+        return "normal"
+    yol = os.path.join(_tekil_dizin(), "sohbet_" + hashlib.sha1(sohbet.encode("utf-8")).hexdigest()[:20] + ".isaret")
+    try:
+        os.makedirs(os.path.dirname(yol), exist_ok=True)
+        try:
+            fd = os.open(yol, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            with open(yol, encoding="utf-8") as f:
+                ilk = f.read().strip()
+            return "gec" if (cursor_olay == "sessionStart" and ilk == "beforeSubmitPrompt") else "normal"
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(cursor_olay)
+    except OSError:
+        return "normal"
+    return "onden" if cursor_olay == "beforeSubmitPrompt" else "normal"
+
+
+def _oturum_baglami(g, env):
+    """İlk istemde, gelmemiş sessionStart'ın bağlamını hook.py SessionStart ile üretir (hata olursa boş)."""
+    try:
+        girdi = girdi_donustur("sessionStart", dict(g, hook_event_name="sessionStart"))
+        p = subprocess.run([sys.executable, _hook_py(), girdi["hook_event_name"]], input=json.dumps(girdi).encode("utf-8"),
+                           capture_output=True, env=env, **cfg.PENCERESIZ)
+        claude = json.loads(p.stdout.decode("utf-8", "replace").strip() or "null")
+        return cikti_donustur("sessionStart", claude).get("additional_context") or ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+
+
 def calistir(cursor_olay, ham):
     """Dönüş: (stdout_metni, çıkış_kodu, stderr_metni)."""
     try:
@@ -199,6 +234,13 @@ def calistir(cursor_olay, ham):
     env.setdefault("CLAUDE_PLUGIN_ROOT", _kok_dizin())
     if claude_girdi.get("cwd"):
         env.setdefault("CLAUDE_PROJECT_DIR", claude_girdi["cwd"])
+    gec_baglam = ""
+    if cursor_olay in ("sessionStart", "beforeSubmitPrompt"):
+        durum = _oturum_isareti(g.get("conversation_id"), cursor_olay)
+        if durum == "gec":
+            return "{}", 0, ""  # bu sohbetin oturum bağlamı ilk istemde zaten verildi
+        if durum == "onden":
+            gec_baglam = _oturum_baglami(g, env)
     p = subprocess.run([sys.executable, _hook_py(), claude_girdi["hook_event_name"]],
                        input=json.dumps(claude_girdi).encode("utf-8"), capture_output=True, env=env, **cfg.PENCERESIZ)
     cikis = p.stdout.decode("utf-8", "replace").strip()
@@ -207,6 +249,9 @@ def calistir(cursor_olay, ham):
     except ValueError:
         claude = None
     cikti = cikti_donustur(cursor_olay, claude)
+    if gec_baglam:
+        ek = cikti.get("additional_context")
+        cikti["additional_context"] = gec_baglam + ("\n" + ek if ek else "")
     if cursor_olay == "preToolUse":
         cikti = kabuk_komutu_duzelt(dict(g, tool_input=claude_girdi.get("tool_input")), cikti)  # girdi_donustur dizgiyi sözlüğe çevirmişti
     return json.dumps(cikti, ensure_ascii=False), p.returncode, p.stderr.decode("utf-8", "replace")
